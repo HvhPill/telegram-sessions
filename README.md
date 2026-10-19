@@ -1,78 +1,80 @@
 # Telegram Sessions
 
-Приложение для Windows: управление сессиями Telegram и конвертация `.session ↔ tdata`.
+A Windows desktop app for managing Telegram sessions and converting `.session ↔ tdata`.
 
-## Скачать для Windows
+**English** · [Русский](README.ru.md)
 
-[Скачать готовую Windows x64 версию](https://github.com/HvhPill/telegram-sessions/releases/latest)
+## Download for Windows
 
-Распакуйте ZIP целиком и запустите `Telegram Sessions.exe`. Установка Node.js или Python не требуется.
+[Download the latest Windows x64 release](https://github.com/HvhPill/telegram-sessions/releases/latest)
 
-## Возможности
+Extract the entire ZIP archive and run `Telegram Sessions.exe`. Python and Node.js are not required for the packaged app. Keep the executable together with its supporting files and folders.
 
-- Пакетная обработка выбранных аккаунтов.
-- Создание второй независимой авторизации с сохранением исходной сессии.
-- Удаление аккаунтов из списка с перемещением исходных файлов в корзину Windows.
-- Создание новой авторизации с проверкой перед завершением старой.
-- Чтение свежего кода из служебного чата Telegram с ручным вводом при необходимости.
-- Проверка и установка 2FA, обновление JSON.
-- Сохранение сессий в отдельных папках по номеру аккаунта.
-- Конвертация Telethon `.session` в Telegram Desktop `tdata` и обратно, включая ZIP.
-- Логи, прогресс и продолжение после прерывания.
-- Тёмный интерфейс, локальный шрифт Inter и анимации.
+## Features
 
-## Запуск из исходников
+- Batch processing for selected accounts.
+- Create a second independent authorization with a new key while keeping the original session active.
+- Rotate a session: create and verify the new authorization before logging out of the old one.
+- Read a fresh login code from Telegram service messages when available, with manual input as a fallback.
+- Read or request a 2FA password, configure 2FA, and update the companion JSON file.
+- Convert Telethon `.session` files to Telegram Desktop `tdata` and back, including ZIP imports.
+- Store results in a separate folder for each phone number.
+- Remove source accounts from the list by moving their files to the Windows Recycle Bin.
+- View progress and logs, and resume interrupted processing.
+- Dark interface with bundled Inter fonts and animations.
 
-Нужен Node.js 24 или новее.
+## Run from source
+
+Requires Node.js 24 or later.
 
 ```sh
 npm ci
 npm start
 ```
 
-Для работы с Telegram укажите собственные API ID и API hash в настройках приложения. Их можно получить в разделе API development tools на [my.telegram.org](https://my.telegram.org).
+Enter your own Telegram API ID and API hash in the app settings. Obtain them from **API development tools** at [my.telegram.org](https://my.telegram.org).
 
-## Сборка Windows x64
+## Build for Windows x64
 
 ```sh
 npm run package:win
 ```
 
-Готовая папка приложения появится в `dist`. Запускайте `Telegram Sessions.exe`, сохраняя рядом служебные файлы и каталоги.
+The application folder is created in `dist`. The build embeds the application icon into the Windows executable.
 
-## Проверки
+## Tests
 
 ```sh
 npm test
 ```
 
-Тесты используют синтетические ключи и аккаунты, не подключаются к Telegram и не содержат личных авторизаций.
+Tests use synthetic accounts and keys. They do not connect to Telegram or contain personal authorizations.
 
-## Данные аккаунтов
+## Account files
 
-Все результаты одного аккаунта сохраняются в одной папке номера:
+Each account uses one phone-number folder:
 
 ```text
 new_sessions/
   +123123123/
-    session/  # .session и парные JSON
-    tdata/    # Telegram Desktop
+    session/  # .session files and companion JSON
+    tdata/    # Telegram Desktop files
 ```
 
-Регенерация и оба направления конвертации используют одну структуру. Если в tdata нет номера телефона, он определяется через настроенный API или запрашивается отдельно. Кнопка с плюсом создаёт второй сеанс новым входом с отдельным ключом; исходная авторизация остаётся действующей.
+Session rotation and both conversion directions use this layout. If the phone number is unavailable in tdata, the app resolves it using the configured API or requests manual input.
 
-Аккаунты, сессии, tdata, API-настройки, пароли и журналы не входят в репозиторий. `.gitignore` исключает рабочие данные и собранные приложения.
+The **+** button creates a new authorization with a separate key and leaves the original active. Format conversion preserves the existing authorization; use the Accounts tab to create a new key.
 
-JSON аккаунта может содержать пароль 2FA в открытом виде. Храните рабочие папки приватно. При конвертации сохраняется существующая авторизация; новый ключ создаётся через вкладку «Аккаунты».
+Account files, sessions, tdata, API settings, passwords, and logs are excluded from the repository. Account JSON files may contain a plaintext 2FA password; keep working folders private.
 
-Подробности использования — в файле [Руководство.txt](Руководство.txt).
+See the [English user guide](GUIDE.en.md) or [Russian user guide](Руководство.txt).
 
-## Контакт
+## Contact
 
 [Telegram: @Kenjee132](https://t.me/Kenjee132)
 
-## Компоненты
+## Components
 
-Electron, GramJS, sql.js, @mtcute/convert, adm-zip, Inter. Лицензия шрифта включена в `ui/fonts/OFL.txt`; лицензии остальных зависимостей поставляются с соответствующими пакетами.
+Electron, GramJS, sql.js, @mtcute/convert, adm-zip, and Inter. The font license is included in `ui/fonts/OFL.txt`; other dependency licenses are distributed with their respective packages.
 
-Telegram Sessions — независимое приложение и не представляет Telegram.
+Telegram Sessions is an independent application and is not affiliated with Telegram. The current application interface is in Russian.
