@@ -1,0 +1,26 @@
+{
+  "name": "telegram-sessions",
+  "version": "2.0.0",
+  "description": "Desktop Telegram session manager",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.js",
+    "package:win": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "@mtcute/convert": "0.32.5",
+    "adm-zip": "0.5.16",
+    "sql.js": "1.13.0",
+    "telegram": "2.26.22"
+  },
+  "devDependencies": {
+    "electron": "42.11.15",
+    "@electron/packager": "20.3.0"
+  },
+  "author": {
+    "name": "Kenjee132",
+    "url": "https://t.me/Kenjee132"
+  }
+}

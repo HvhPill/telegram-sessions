@@ -1,0 +1,43 @@
+# Dependencies and generated packages
+node_modules/
+dist/
+out/
+release/
+build/
+*.exe
+*.asar
+*.asar.unpacked/
+*.zip
+
+# Private Telegram data and configuration
+data/
+new_sessions/
+accounts/
+conversions/
+.state/
+old/
+tdata/
+**/tdata/
+key_data*
+*.session
+*.session-*
+*.session.*
+settings.json
+account.json
+report.json
+conversion-report.json
+.manager.lock
+.running.lock
+*.log
+.env
+.env.*
+
+# Diagnostics and local tooling
+smoke*.json
+smoke*.log
+preview*.png
+work/
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
