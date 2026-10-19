@@ -2,6 +2,12 @@
 
 Приложение для Windows: управление сессиями Telegram и конвертация `.session ↔ tdata`.
 
+## Скачать для Windows
+
+[Скачать готовую Windows x64 версию](https://github.com/HvhPill/telegram-sessions/releases/latest)
+
+Распакуйте ZIP целиком и запустите `Telegram Sessions.exe`. Установка Node.js или Python не требуется.
+
 ## Возможности
 
 - Пакетная обработка выбранных аккаунтов.
