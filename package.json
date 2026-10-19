@@ -16,8 +16,9 @@
     "telegram": "2.26.22"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "electron": "42.11.15",
-    "@electron/packager": "20.3.0"
+    "rcedit": "5.0.2"
   },
   "author": {
     "name": "Kenjee132",

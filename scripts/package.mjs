@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { packager } from '@electron/packager';
+import { rcedit } from 'rcedit';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const destinations = await packager({
@@ -21,6 +22,10 @@ const destinations = await packager({
   ignore: [/^\/data(?:\/|$)/, /^\/dist(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/\.git(?:\/|$)/, /^\/README\.md$/, /^\/Руководство\.txt$/],
 });
 for (const destination of destinations) {
+  // Replace the executable's default icon group as well as the window icon.
+  await rcedit(path.join(destination, 'Telegram Sessions.exe'), {
+    icon: path.join(root, 'assets', 'app.ico'),
+  });
   await fs.copyFile(path.join(root, 'Руководство.txt'), path.join(destination, 'Руководство.txt'));
   console.log(destination);
 }
