@@ -36,6 +36,8 @@ const errors = {
   TDATA_FOLDER_NOT_FOUND: 'Папка tdata не найдена. Выберите папку с key_datas или архив с tdata.',
   TDATA_PASSCODE_INVALID: 'Неверный локальный код блокировки Telegram Desktop или повреждённые данные.',
   USER_ID_REQUIRED: 'Нужен числовой ID этого Telegram-аккаунта. Это не API ID и не номер телефона.',
+  ACCOUNT_PHONE_REQUIRED: 'Введите корректный номер аккаунта с кодом страны.',
+  ACCOUNT_FOLDER_IDENTITY_MISMATCH: 'В папке этого номера уже есть другой аккаунт. Проверьте номер.',
   INVALID_CONVERSION_INPUT: 'Выберите файлы для конвертации ещё раз.',
   UNSAFE_ZIP_PATH: 'Архив содержит недопустимые пути. Выберите исходную папку tdata.',
   TDATA_ARCHIVE_TOO_LARGE: 'Слишком много данных авторизации в архиве. Выберите папку tdata.',
@@ -123,6 +125,7 @@ function render() {
   $('#selection-count').textContent = state.selected.size ? `· ВЫБРАНО ${state.selected.size}` : '';
   $('#selected-label').textContent = state.selected.size ? `Запустить выбранные (${state.selected.size})` : 'Запустить выбранные';
   $('#start-selected').disabled = state.busy || !state.selected.size;
+  $('#delete-selected').disabled = state.busy || !state.selected.size;
   $('#nav-count').textContent = state.accounts.length; $('#total').textContent = state.accounts.length;
   $('#completed').textContent = state.accounts.filter(a => a.status === 'complete').length;
   $('#empty').hidden = state.accounts.length > 0;
@@ -140,7 +143,7 @@ function render() {
     if (isNew) card.animate([{opacity:0,transform:'translateY(9px)'},{opacity:1,transform:'translateY(0)'}], {duration:350,delay:Math.min(i*40,320),fill:'backwards',easing:'cubic-bezier(.22,1,.36,1)'});
     const name = account.phone ? '+' + String(account.phone).replace(/^\+/, '') : account.name.replace(/\.session$/, '');
     const badge = account.status === 'running' ? 'processing' : account.status === 'complete' ? 'success' : account.status === 'failed' ? 'error' : '';
-    card.innerHTML = `<input class="account-select" type="checkbox" aria-label="Выбрать ${escape(name)}" ${state.selected.has(account.name) ? 'checked' : ''} ${state.busy ? 'disabled' : ''}><span class="card-accent"></span><div class="avatar" title="Последние два символа номера или имени файла">${escape(name.slice(-2))}</div><div class="account-info"><div class="account-name">${escape(name)}</div><div class="account-meta"><i>${icon('file')}</i><span class="filename" title="${escape(account.detail || account.name)}">${escape(account.detail || account.name)}</span><span class="meta-divider">·</span><span>Telethon</span></div></div><span class="badge ${badge}"><span class="status-dot"></span>${escape(labels[account.status] || 'Остановлен')}</span><div class="card-actions"><button class="button primary" data-action="start" ${state.busy ? 'disabled' : ''}>${icon('play')}Запуск</button><button class="button icon-button" data-action="stop" aria-label="Остановить очередь после аккаунта" title="Остановить после текущего аккаунта" ${!state.busy || state.current !== account.name ? 'disabled' : ''}>${icon('stop')}</button><button class="button" data-action="folder">${icon('folder')}<span class="folder-label">Папка</span></button><button class="button icon-button" data-action="results" title="Открыть результаты" aria-label="Открыть результаты">${icon('arrow')}</button></div>`;
+    card.innerHTML = `<input class="account-select" type="checkbox" aria-label="Выбрать ${escape(name)}" ${state.selected.has(account.name) ? 'checked' : ''} ${state.busy ? 'disabled' : ''}><span class="card-accent"></span><div class="avatar" title="Последние два символа номера или имени файла">${escape(name.slice(-2))}</div><div class="account-info"><div class="account-name">${escape(name)}</div><div class="account-meta"><i>${icon('file')}</i><span class="filename" title="${escape(account.detail || account.name)}">${escape(account.detail || account.name)}</span><span class="meta-divider">·</span><span>Telethon</span></div></div><span class="badge ${badge}"><span class="status-dot"></span>${escape(labels[account.status] || 'Остановлен')}</span><div class="card-actions"><button class="button primary" data-action="start" ${state.busy ? 'disabled' : ''}>${icon('play')}Запуск</button><button class="button icon-button" data-action="additional" title="Создать вторую новую авторизацию, сохранив исходную" aria-label="Создать вторую сессию" ${state.busy ? 'disabled' : ''}>${icon('plus')}</button><button class="button icon-button" data-action="stop" aria-label="Остановить очередь после аккаунта" title="Остановить после текущего аккаунта" ${!state.busy || state.current !== account.name ? 'disabled' : ''}>${icon('stop')}</button><button class="button" data-action="folder">${icon('folder')}<span class="folder-label">Папка</span></button><button class="button icon-button danger" data-action="delete" title="Удалить аккаунт из списка" aria-label="Удалить аккаунт" ${state.busy ? 'disabled' : ''}>${icon('trash')}</button><button class="button icon-button" data-action="results" title="Открыть результаты" aria-label="Открыть результаты">${icon('arrow')}</button></div>`;
   }
 }
 function openModal(html, kind) {
@@ -181,12 +184,12 @@ async function importAccounts() {
   try { const data = await call(bridge.importAccounts); state.accounts = data.accounts; render(); if (data.imported) toast(`Добавлено аккаунтов: ${data.imported}`); if (data.skipped) toast(`Пропущено: ${data.skipped}. Совпадает имя или файл используется.`, true); }
   catch (e) { failure(e); }
 }
-async function start(selected = null) {
+async function start(selected = null, additional = false) {
   if (state.busy) return;
   if (!state.config.apiId || !state.config.apiHash) { settings(); toast('Сначала укажите API ID и API hash'); return; }
   if (!state.accounts.length) { await importAccounts(); return; }
   try {
-    await call(bridge.start, selected);
+    await call(additional ? bridge.startAdditional : bridge.start, selected);
     state.finished = 0; state.total = selected ? selected.length : state.accounts.length;
     $('#progress-fill').style.width = '0%'; setBusy(true); status('Начинаем обработку…');
     log(selected ? `Запуск аккаунта: ${selected.join(', ')}` : 'Запуск очереди аккаунтов');
@@ -194,13 +197,14 @@ async function start(selected = null) {
 }
 async function stop() { try { await call(bridge.stop); $('#stop').disabled = true; status('Остановка после текущего аккаунта'); toast('Очередь остановится после текущего аккаунта'); } catch (e) { failure(e); } }
 function prompt(data) {
-  const secret = !['code','user-id'].includes(data.kind);
+  const secret = !['code','user-id','phone-number'].includes(data.kind);
   const confirm = data.kind === 'new-password';
-  const label = data.kind === 'user-id' ? 'Числовой ID Telegram-аккаунта' : data.kind === 'local-passcode' ? 'Локальный код блокировки' : secret ? 'Пароль 2FA' : 'Код входа';
+  const label = data.kind === 'phone-number' ? 'Номер с кодом страны' : data.kind === 'user-id' ? 'Числовой ID Telegram-аккаунта' : data.kind === 'local-passcode' ? 'Локальный код блокировки' : secret ? 'Пароль 2FA' : 'Код входа';
   openModal(`<div class="modal-heading"><h2 id="modal-title">${escape(data.title)}</h2><span class="badge">${escape(data.name)}</span></div><p class="description">${escape(data.description)}</p><label for="prompt-value">${secret ? 'Пароль 2FA' : 'Код входа'}</label><input id="prompt-value" class="${secret ? '' : 'code'}" type="${secret ? 'password' : 'text'}" autocomplete="off" ${secret ? '' : 'inputmode="numeric"'}>${confirm ? '<label for="prompt-confirm">Повторите пароль</label><input id="prompt-confirm" type="password" autocomplete="off">' : ''}<div class="modal-error" id="prompt-error" role="alert"></div><div class="info-box">${secret ? 'Пароль будет сохранён в JSON аккаунта.' : 'Код используется только для входа и не записывается в журнал.'} Отмена остановит очередь и сохранит текущее состояние.</div><div class="modal-footer"><button class="button" id="cancel-prompt">Отмена</button><button class="button primary" id="submit-prompt">Продолжить<i data-icon="arrow"></i></button></div>`, 'prompt');
   $('#cancel-prompt').onclick = async () => { try { await call(bridge.reply, {id:data.id,value:null}); await dismiss(); } catch (e) { failure(e); } };
   $('.modal label[for="prompt-value"]').textContent = label;
   if (data.kind === 'local-passcode') $('.modal .info-box').textContent = 'Локальный код используется только для чтения tdata и не сохраняется. Это не пароль 2FA.';
+  if (data.kind === 'phone-number') { $('#prompt-value').classList.remove('code'); $('.modal .info-box').textContent = 'Например, +380123456789. Номер нужен для имени папки аккаунта.'; }
   if (data.kind === 'user-id') {
     $('#prompt-value').classList.remove('code');
     $('.modal .info-box').textContent = 'Нужен ID самого аккаунта, а не API ID приложения и не номер телефона.';
@@ -266,6 +270,8 @@ $('#cards').onclick = e => {
   const button = e.target.closest('[data-action]'); if (!button || button.disabled) return;
   const name = button.closest('.account-card').dataset.name;
   if (button.dataset.action === 'start') start([name]);
+  if (button.dataset.action === 'additional') start([name], true);
+  if (button.dataset.action === 'delete') deleteAccounts([name]);
   if (button.dataset.action === 'stop') stop();
   if (button.dataset.action === 'folder') call(bridge.openAccountFolder, name).catch(failure);
   if (button.dataset.action === 'results') call(bridge.openFolder, 'output').catch(failure);
@@ -288,6 +294,8 @@ $('#select-all').onchange = () => {
 $('#import').onclick = importAccounts; $('#empty-import').onclick = importAccounts; $('#settings').onclick = settings;
 $('#start-all').onclick = () => start(); $('#stop').onclick = stop;
 $('#start-selected').onclick = () => start([...state.selected]);
+$('#delete-selected').onclick = () => deleteAccounts([...state.selected]);
+async function deleteAccounts(names) { if(state.busy) return; try { const result=await call(bridge.deleteAccounts,names); if(!result.cancelled) {state.accounts=result.accounts;names.forEach(n=>state.selected.delete(n));render();toast('Аккаунты убраны из списка. Исходные файлы в корзине.');} } catch(e){failure(e)} }
 $('#refresh').onclick = async () => { $('#refresh').classList.add('spin'); try { state.accounts = await call(bridge.scan); render(); } catch (e) { failure(e); } finally { setTimeout(() => $('#refresh').classList.remove('spin'), 350); } };
 $('#open-results').onclick = () => call(bridge.openFolder, 'output').catch(failure);
 $('#clear-log').onclick = () => {
@@ -307,7 +315,7 @@ $('#conversion-results').onclick = () => call(bridge.openFolder, 'conversions').
 $('#contact').onclick = () => call(bridge.openContact).catch(failure);
 $('#about').onclick = () => {
   if (state.modal) return;
-  openModal('<div class="modal-heading"><h2 id="modal-title">Telegram Sessions</h2><button class="modal-close" id="close-about" aria-label="Закрыть"><i data-icon="close"></i></button></div><p class="description">Версия 2.0.0 · Windows x64</p><div class="info-box">Управление авторизациями Telegram, пакетная обработка аккаунтов и конвертация .session ↔ tdata.</div><p class="description">Данные обрабатываются на вашем компьютере. Рабочие папки и параметры подключения доступны в настройках.</p><div class="modal-footer"><button class="button primary" id="done-about">Готово</button></div>', 'about');
+  openModal('<div class="modal-heading"><h2 id="modal-title">Telegram Sessions</h2><button class="modal-close" id="close-about" aria-label="Закрыть"><i data-icon="close"></i></button></div><p class="description">Версия 2.1.0 · Windows x64</p><div class="info-box">Управление авторизациями Telegram, пакетная обработка аккаунтов и конвертация .session ↔ tdata.</div><p class="description">Данные обрабатываются на вашем компьютере. Рабочие папки и параметры подключения доступны в настройках.</p><div class="modal-footer"><button class="button primary" id="done-about">Готово</button></div>', 'about');
   $('#close-about').onclick = dismiss; $('#done-about').onclick = dismiss;
 };
 for (const action of ['minimize','maximize','close']) $('#' + action).onclick = () => call(bridge.window, action).catch(failure);

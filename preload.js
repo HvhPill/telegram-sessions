@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('manager', Object.freeze({
   chooseFolder: () => invoke('choose-folder'), saveSettings: data => invoke('save-settings', data),
   importAccounts: () => invoke('import'), openFolder: which => invoke('open-folder', which),
   start: selected => invoke('start', selected), stop: () => invoke('stop'),
+  startAdditional: selected => invoke('start-additional', selected), deleteAccounts: names => invoke('delete-accounts', names),
   reply: value => invoke('reply', value), window: action => invoke('window', action),
   convertPick: data => invoke('convert-pick', data), convertStart: data => invoke('convert-start', data),
   openAccountFolder: name => invoke('account-folder', name),

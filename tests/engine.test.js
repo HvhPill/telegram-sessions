@@ -31,7 +31,7 @@ async function fixture(t, options = {}) {
     let authorized = index !== 1 || options.preauthorized;
     const c = {
       session: s,
-      async connect() { if (!s.authKey) { const fresh = await session(2); s.setDC(fresh.dcId, fresh.serverAddress, fresh.port); s.authKey = fresh.authKey; } },
+      async connect() { if (!s.authKey) { const fresh = await session(2 + Math.floor(index / 3)); s.setDC(fresh.dcId, fresh.serverAddress, fresh.port); s.authKey = fresh.authKey; } },
       async destroy() { calls.push('destroy:' + index); },
       async getMe() {
         if (options.badReopen && index === 2) throw new Error('AUTH_KEY_UNREGISTERED');
@@ -80,7 +80,7 @@ test('successful rotation verifies disk, logs out old and archives source', asyn
   assert.equal(result[0].status, 'complete'); assert.ok(f.calls.includes('logout'));
   assert.equal(fs.existsSync(f.source), false);
   const data = readJSON(path.join(f.output, '.state', 'account.json'));
-  assert.equal(path.basename(path.dirname(data.session_file)), '+10000000000');
+  assert.equal(path.basename(path.dirname(path.dirname(data.session_file))), '+10000000000');
   assert.equal(readJSON(data.json_file).session_file, data.session_file);
   assert.equal(path.basename(data.json_file, '.json'), path.basename(data.session_file, '.session'));
   assert.ok(!fs.readdirSync(f.output).some(name => name.endsWith('.session')));
@@ -211,7 +211,33 @@ test('legacy completed files migrate to a phone folder without network requests'
   const results = await f.engine.run(null); assert.equal(results[0].status, 'complete');
   assert.equal(f.calls.length, 0); assert.equal(fs.existsSync(legacy), false);
   const data = readJSON(path.join(f.output, '.state', 'account.json'));
-  assert.equal(path.dirname(data.session_file), path.join(f.output, '+10000000000'));
+  assert.equal(path.dirname(data.session_file), path.join(f.output, '+10000000000', 'session'));
   assert.ok(fs.existsSync(data.json_file)); assert.equal(fs.existsSync(path.join(f.output, 'account.json')), false);
 });
+test('additional session creates a fresh key and keeps original authorization', async t => {
+  const f = await fixture(t); f.engine.config.keepOld = true; f.engine.config.forceNew = true;
+  const original = fs.readFileSync(f.source);
+  const first = await f.engine.run(['account.session']); assert.equal(first[0].status, 'complete');
+  const data1 = readJSON(path.join(f.output, '.state', 'account.json'));
+  assert.equal(data1.keep_old, true); assert.ok(!f.calls.includes('logout'));
+  assert.deepEqual(fs.readFileSync(f.source), original);
+  assert.ok(!(await loadSession(data1.session_file)).authKey.getKey().equals((await loadSession(f.source)).authKey.getKey()));
+  const second = await f.engine.run(['account.session']); assert.equal(second[0].status, 'complete');
+  const data2 = readJSON(path.join(f.output, '.state', 'account.json'));
+  assert.notEqual(data1.session_file, data2.session_file);
+  assert.ok(!(await loadSession(data1.session_file)).authKey.getKey().equals((await loadSession(data2.session_file)).authKey.getKey()));
+  assert.ok(fs.existsSync(data1.session_file)); assert.ok(fs.existsSync(f.source)); assert.ok(!f.calls.includes('logout'));
+});
+test('additional login uses valid saved session after original was logged out', async t => {
+  const f = await fixture(t); await f.engine.run(['account.session']);
+  const saved = readJSON(path.join(f.output, '.state', 'account.json')).session_file;
+  assert.equal(fs.existsSync(f.source), false);
+  const logoutCount = f.calls.filter(c => c === 'logout').length;
+  f.engine.config.keepOld = true; f.engine.config.forceNew = true;
+  const results = await f.engine.run(['account.session']); assert.equal(results[0].status, 'complete');
+  const next = readJSON(path.join(f.output, '.state', 'account.json'));
+  assert.equal(next.additional_source_session, saved); assert.notEqual(next.session_file, saved);
+  assert.equal(f.calls.filter(c => c === 'logout').length, logoutCount); assert.ok(fs.existsSync(saved));
+});
+
 

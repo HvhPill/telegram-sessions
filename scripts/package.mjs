@@ -15,8 +15,8 @@ const destinations = await packager({
   overwrite: true,
   asar: { unpack: '**/*.node' },
   icon: path.join(root, 'assets', 'app.ico'),
-  appVersion: '2.0.0',
-  buildVersion: '2.0.0.0',
+  appVersion: '2.1.0',
+  buildVersion: '2.1.0.0',
   win32metadata: { ProductName: 'Telegram Sessions', FileDescription: 'Telegram Sessions', CompanyName: '' },
   ignore: [/^\/data(?:\/|$)/, /^\/dist(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/\.git(?:\/|$)/, /^\/README\.md$/, /^\/Руководство\.txt$/],
 });

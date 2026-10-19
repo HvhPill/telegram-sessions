@@ -43,6 +43,41 @@ function userIdFrom(data) {
   return null;
 }
 function safeName(value) { return String(value).replace(/[^\p{L}\p{N}_.-]/gu, '_').slice(0, 90) || 'account'; }
+function normalizedPhone(value) {
+  const phone = String(value || '').replace(/[\s()+-]/g, '');
+  if (!/^\d{5,20}$/.test(phone)) throw new Error('ACCOUNT_PHONE_REQUIRED');
+  return '+' + phone;
+}
+async function publishAccount(output, input, desktop, metadata) {
+  const folder = path.join(output, normalizedPhone(metadata.phone));
+  const sessions = path.join(folder, 'session');
+  fs.mkdirSync(sessions, { recursive: true });
+  for (const entry of fs.readdirSync(sessions).filter(name => name.endsWith('.json'))) {
+    const known = userIdFrom(readJSON(path.join(sessions, entry)));
+    if (known && userIdFrom(metadata) && known !== userIdFrom(metadata)) throw new Error('ACCOUNT_FOLDER_IDENTITY_MISMATCH');
+  }
+  let target = path.join(sessions, path.basename(input));
+  if (fs.existsSync(target)) {
+    const current = await loadSession(target), next = await loadSession(input);
+    if (!current.authKey.getKey().equals(next.authKey.getKey())) target = path.join(sessions, path.basename(input, '.session') + '_' + crypto.randomUUID().slice(0, 8) + '.session');
+  }
+  if (path.resolve(input) !== path.resolve(target)) fs.copyFileSync(input, target);
+  const tdata = path.join(folder, 'tdata');
+  const staged = path.join(folder, '.tdata-' + crypto.randomUUID());
+  fs.cpSync(desktop, staged, { recursive: true });
+  let backup;
+  if (fs.existsSync(tdata)) {
+    backup = path.join(output, '.state', 'history', path.basename(folder) + '_' + crypto.randomUUID(), 'tdata');
+    fs.mkdirSync(path.dirname(backup), { recursive: true }); fs.renameSync(tdata, backup);
+  }
+  try { fs.renameSync(staged, tdata); }
+  catch (error) { if (backup && !fs.existsSync(tdata)) fs.renameSync(backup, tdata); throw error; }
+  const json = { ...metadata, phone: normalizedPhone(metadata.phone).slice(1), session_file: target, json_file: target.replace(/\.session$/, '.json'), account_folder: folder, tdata_path: tdata };
+  for (const key of ['source_session','status','expected_user_id']) delete json[key];
+  saveJSON(json.json_file, json);
+  // Keep companion paths current when older metadata refers to the moved file.
+  return { session: target, tdata, folder };
+}
 function tdataFolders(root, depth = 0) {
   if (depth > 3) return [];
   const files = fs.readdirSync(root, { withFileTypes: true });
@@ -130,22 +165,29 @@ async function tdataToSessions(input, output, passcode = '') {
   return files;
 }
 class Converter {
-  constructor(config, emit, prompt, resolveUserId) { this.config = config; this.emit = emit; this.prompt = prompt; this.resolveUserId = resolveUserId; this.stop = false; }
+  constructor(config, emit, prompt, resolveUserId, resolvePhone) { this.config = config; this.emit = emit; this.prompt = prompt; this.resolveUserId = resolveUserId; this.resolvePhone = resolvePhone; this.stop = false; }
+  async phone(file, metadata, name) {
+    if (metadata.phone) return normalizedPhone(metadata.phone).slice(1);
+    const value = this.resolvePhone ? await this.resolvePhone(file, metadata, name) : await this.prompt({ name, kind: 'phone-number', title: 'Номер аккаунта', description: 'Для единой папки аккаунта укажите его номер телефона с кодом страны.' });
+    return normalizedPhone(value).slice(1);
+  }
   event(name, detail, status = 'running') {
     this.emit({ type: 'conversion', name, detail, status });
     fs.appendFileSync(path.join(this.config.output, 'run.log'), `${new Date().toISOString()} | Конвертация | ${String(name).replace(/[\r\n]/g, ' ')} | ${detail}\n`);
   }
   async run(direction, inputs) {
-    const output = path.join(this.config.output, 'conversions');
+    const output = this.config.output;
     fs.mkdirSync(output, { recursive: true });
     const results = [];
     for (const input of inputs) {
       if (this.stop) break;
       const name = path.basename(input);
-      let temp;
+      let temp, staging;
       try {
         this.event(name, 'Читаем исходные файлы');
-        let target = path.join(output, safeName(path.basename(input, path.extname(input))) + '_' + crypto.randomUUID().slice(0, 8));
+        const stageRoot = path.join(output, '.state', 'conversion-staging'); fs.mkdirSync(stageRoot, { recursive: true });
+        staging = fs.mkdtempSync(path.join(stageRoot, 'job-'));
+        let target = path.join(staging, 'result');
         let files;
         if (direction === 'session-to-tdata') {
           const metadata = readJSON(input.replace(/\.session$/i, '.json'));
@@ -154,10 +196,10 @@ class Converter {
             this.event(name, 'Определяем ID аккаунта для Telegram Desktop');
             id = await this.resolveUserId(input, name);
           }
-          const phone = String(metadata.phone || '').replace(/^\+/, '');
-          target = path.join(output, /^\d{5,20}$/.test(phone) ? '+' + phone : 'account_' + id, path.basename(target));
+          metadata.user_id = id; metadata.phone = await this.phone(input, metadata, name);
           this.event(name, 'Создаём и проверяем файлы tdata');
-          const result = await sessionToTdata(input, target, id, metadata); files = [result.folder];
+          const result = await sessionToTdata(input, target, id, metadata);
+          const published = await publishAccount(output, input, result.folder, metadata); files = [published.session, published.tdata];
         } else {
           const root = path.extname(input).toLowerCase() === '.zip' ? (temp = extractZip(input)) : input;
           const folders = tdataFolders(root);
@@ -169,7 +211,16 @@ class Converter {
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
                 this.event(name, 'Расшифровываем tdata и сохраняем .session');
-                files.push(...await tdataToSessions(folder, target, passcode)); break;
+                const converted = await tdataToSessions(folder, target, passcode);
+                for (const file of converted) {
+                  const metadata = readJSON(file.replace(/\.session$/, '.json'));
+                  metadata.phone = await this.phone(file, metadata, name);
+                  metadata.conversion_source = input;
+                  const generated = await sessionToTdata(file, path.join(staging, 'desktop-' + crypto.randomUUID()), metadata.user_id, metadata);
+                  const published = await publishAccount(output, file, generated.folder, metadata);
+                  files.push(published.session, published.tdata);
+                }
+                break;
               } catch (error) {
                 if (!/Failed to decrypt/.test(error.message) || attempt === 2) throw error;
                 passcode = await this.prompt({ name, kind: 'local-passcode', title: 'Локальный код Telegram Desktop', description: 'Эта папка tdata защищена локальным кодом блокировки Telegram Desktop. Это не облачный пароль 2FA.' });
@@ -177,7 +228,7 @@ class Converter {
             }
           }
         }
-        if (direction === 'tdata-to-session') for (const file of files) {
+        if (direction === 'tdata-to-session') for (const file of files.filter(file => file.endsWith('.session'))) {
           const jsonPath = file.replace(/\.session$/, '.json');
           const json = readJSON(jsonPath); json.conversion_source = input; saveJSON(jsonPath, json);
         }
@@ -188,10 +239,17 @@ class Converter {
         this.event(name, code, code === 'CANCELLED' ? 'cancelled' : 'failed');
         results.push({ name, status: code === 'CANCELLED' ? 'cancelled' : 'failed', error: code });
         if (code === 'CANCELLED') this.stop = true;
-      } finally { if (temp) cleanup(temp); }
+      } finally {
+        if (temp) cleanup(temp);
+        if (staging) {
+          const allowed = path.resolve(output, '.state', 'conversion-staging') + path.sep;
+          if (!path.resolve(staging).startsWith(allowed)) throw new Error('INVALID_TEMP_PATH');
+          fs.rmSync(staging, { recursive: true, force: true });
+        }
+      }
     }
     saveJSON(path.join(output, 'conversion-report.json'), { direction, results });
     return results;
   }
 }
-module.exports = { Converter, sessionToTdata, tdataToSessions, openTdata, tdataFolders, extractZip, cleanup, userIdFrom, cryptoProvider, fileSystem };
+module.exports = { Converter, sessionToTdata, tdataToSessions, openTdata, tdataFolders, extractZip, cleanup, userIdFrom, cryptoProvider, fileSystem, publishAccount, normalizedPhone };

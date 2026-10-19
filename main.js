@@ -109,7 +109,7 @@ else {
       return { accounts: discover(config.input, config.output), imported, skipped };
     });
     handle('open-folder', async which => {
-      const target = which === 'input' ? config.input : which === 'conversions' ? path.join(config.output, 'conversions') : config.output;
+      const target = which === 'input' ? config.input : config.output;
       fs.mkdirSync(target, { recursive: true });
       const error = await shell.openPath(target);
       if (error) throw new Error('CANNOT_OPEN_FOLDER');
@@ -141,7 +141,17 @@ else {
         if (!/^[1-9]\d{0,17}$/.test(value)) throw new Error('USER_ID_REQUIRED');
         return value;
       };
-      const instance = new Converter({ ...config, output: path.resolve(config.output) }, send, prompt, resolveUserId);
+      const resolvePhone = async (file, metadata, name) => {
+        if (Number(config.apiId) > 0 && /^[a-f0-9]{32}$/i.test(config.apiHash)) {
+          const existing = client(await loadSession(file), config);
+          try {
+            await existing.connect(); const me = await identity(existing);
+            if (me?.phone && (!metadata.user_id || String(me.id) === String(metadata.user_id))) return me.phone;
+          } finally { await existing.destroy(); }
+        }
+        return prompt({ name, kind: 'phone-number', title: 'Номер аккаунта', description: 'Номер отсутствует в данных tdata. Введите номер этого аккаунта с кодом страны — он будет названием единой папки.' });
+      };
+      const instance = new Converter({ ...config, output: path.resolve(config.output) }, send, prompt, resolveUserId, resolvePhone);
       engine = instance;
       setImmediate(async () => {
         try { const results = await instance.run(direction, [...new Set(inputs)]); send({ type: 'conversion-done', results, stopped: instance.stop }); }
@@ -150,11 +160,11 @@ else {
       });
       return true;
     });
-    handle('start', async selected => {
+    const startEngine = async (selected, additional = false) => {
       if (engine) throw new Error('BUSY');
       config = validate(config);
       if (selected !== null && (!Array.isArray(selected) || !selected.every(n => typeof n === 'string' && path.basename(n) === n))) throw new Error('INVALID_SELECTION');
-      const instance = new Engine(config, send, prompt);
+      const instance = new Engine({ ...config, keepOld: additional, forceNew: additional }, send, prompt);
       engine = instance;
       // Start only after the IPC response so the UI reliably enters running state.
       setImmediate(async () => {
@@ -163,6 +173,26 @@ else {
         finally { engine = null; }
       });
       return true;
+    };
+    handle('start', selected => startEngine(selected));
+    handle('start-additional', selected => startEngine(selected, true));
+    handle('delete-accounts', async names => {
+      if (engine) throw new Error('BUSY');
+      if (!Array.isArray(names) || !names.length || names.some(n => typeof n !== 'string' || path.basename(n) !== n)) throw new Error('INVALID_SELECTION');
+      const known = discover(config.input, config.output);
+      const accounts = names.map(name => known.find(a => a.name === name));
+      if (accounts.some(a => !a)) throw new Error('INVALID_SELECTION');
+      const answer = await dialog.showMessageBox(win, { type: 'warning', title: 'Удалить аккаунты', message: `Убрать выбранные аккаунты из списка? (${accounts.length})`, detail: 'Исходные файлы будут перемещены в корзину. Готовые результаты сохранятся. Авторизации в Telegram не завершаются.', buttons: ['Отмена', 'В корзину'], defaultId: 0, cancelId: 0 });
+      if (answer.response !== 1) return { cancelled: true };
+      for (const account of accounts) {
+        const stem = account.name.replace(/\.session$/, '');
+        const journal = path.join(config.output, '.state', stem + '.json');
+        const legacy = path.join(config.output, stem + '.json');
+        const paths = [account.source, account.source.replace(/\.session$/, '.json')];
+        paths.push(journal, legacy);
+        for (const file of [...new Set(paths)]) if (fs.existsSync(file)) await shell.trashItem(file);
+      }
+      return { accounts: discover(config.input, config.output) };
     });
     handle('stop', () => { if (engine) engine.stop = true; return true; });
     handle('reply', ({ id, value }) => {

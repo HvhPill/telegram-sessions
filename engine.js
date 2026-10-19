@@ -99,7 +99,7 @@ async function writeSession(file, session) {
 function client(session, config) {
   const logger = new Logger('none');
   return new TelegramClient(session, Number(config.apiId), config.apiHash, {
-    deviceModel: 'Telegram Sessions Desktop', appVersion: '2.0.0',
+    deviceModel: 'Telegram Sessions Desktop', appVersion: '2.1.0',
     connectionRetries: 2, requestRetries: 3, autoReconnect: false,
     floodSleepThreshold: 0, baseLogger: logger, useWSS: false,
   });
@@ -144,7 +144,9 @@ function accountLayout(output, stem, data, journal) {
   const original = path.resolve(data.session_file);
   const relative = path.relative(output, original);
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('INVALID_OUTPUT_PATH');
-  const target = path.join(folder, path.basename(original));
+  fs.mkdirSync(path.join(folder, 'session'), { recursive: true });
+  fs.mkdirSync(path.join(folder, 'tdata'), { recursive: true });
+  const target = path.join(folder, 'session', path.basename(original));
   data.account_folder = folder;
   if (original !== target) {
     data.previous_session_file = original;
@@ -216,8 +218,15 @@ class Engine {
     if (stem.toLowerCase() === 'report') throw new Error('RESERVED_ACCOUNT_NAME');
     const journal = path.join(config.output, '.state', stem + '.json');
     let data = readJSON(journal);
+    let additionalSeed = {};
     if (!Object.keys(data).length) data = readJSON(path.join(config.output, stem + '.json'));
     if (data.source_session && path.resolve(data.source_session) !== source) throw new Error('OUTPUT_NAME_COLLISION');
+    if (config.forceNew && data.status === 'complete') {
+      const history = path.join(config.output, '.state', 'history'); fs.mkdirSync(history, { recursive: true });
+      saveJSON(path.join(history, stem + '_' + crypto.randomUUID() + '.json'), data);
+      additionalSeed = { additional_source_session: data.session_file, two_fa: data.two_fa, phone: data.phone, expected_user_id: data.expected_user_id };
+      data = {};
+    }
     if (data.status === 'complete') {
       accountLayout(config.output, stem, data, journal);
       return { status: 'complete', detail: 'Уже обработан · ' + path.basename(data.account_folder) };
@@ -225,14 +234,16 @@ class Engine {
     if (!data.source_session) {
       if (Object.keys(data).length) throw new Error('OUTPUT_NAME_COLLISION');
       data = readJSON(source.replace(/\.session$/, '.json'));
-      for (const key of ['status', 'session_file', 'source_session', 'expected_user_id', 'account_folder', 'previous_session_file', 'json_file']) delete data[key];
+      for (const key of ['status', 'session_file', 'source_session', 'expected_user_id', 'account_folder', 'previous_session_file', 'json_file', 'additional_source_session']) delete data[key];
       Object.assign(data, { source_session: source,
         session_file: path.join(config.output, `${stem}_${crypto.randomUUID()}.session`),
-        api_id: config.apiId, api_hash: config.apiHash, status: 'created' });
+        api_id: config.apiId, api_hash: config.apiHash, status: 'created', keep_old: Boolean(config.keepOld) });
+      Object.assign(data, additionalSeed);
       saveJSON(journal, data);
     }
     if (!path.resolve(data.session_file).startsWith(config.output + path.sep) || path.resolve(data.session_file) === source) throw new Error('INVALID_OUTPUT_PATH');
     const credentials = { ...config, apiId: data.api_id, apiHash: data.api_hash };
+    if (config.keepOld) data.keep_old = true;
     let old, fresh, who;
     const request = fn => this.request(fn, item.name);
     const commit = status => {
@@ -241,8 +252,9 @@ class Engine {
     };
     try {
       this.stage(item.name, 'connecting', 'Проверяем старую авторизацию');
-      if (fs.existsSync(source)) {
-        old = this.makeClient(await loadSession(source), credentials);
+      const loginSource = data.additional_source_session || source;
+      if (fs.existsSync(loginSource)) {
+        old = this.makeClient(await loadSession(loginSource), credentials);
         await old.connect();
         who = await request(() => identity(old));
       }
@@ -324,6 +336,11 @@ class Engine {
       if (!persisted || String(persisted.id) !== data.expected_user_id) throw new Error('PERSISTED_SESSION_INVALID');
       commit('ready_to_logout');
       this.stage(item.name, 'verified', 'Новая сессия успешно открыта с диска и проверена');
+      if (data.keep_old) {
+        commit('complete');
+        this.stage(item.name, 'complete', 'Создана отдельная новая авторизация. Исходная сессия сохранена');
+        return { status: 'complete', detail: 'Вторая авторизация создана · исходная сохранена' };
+      }
       if (who) {
         this.stage(item.name, 'logout', 'Завершаем старую авторизацию');
         const result = await request(() => old.invoke(new Api.auth.LogOut()));

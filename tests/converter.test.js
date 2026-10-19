@@ -53,7 +53,7 @@ test('ZIP reads auth files and ignores executable and media files', async t => {
   } finally { cleanup(temp); }
 });
 test('conversion batch continues after an invalid file, with private logs', async t => {
-  const f = await fixture(t); saveJSON(f.file.replace('.session', '.json'), { user_id: '123', two_fa: 'not-for-logs' });
+  const f = await fixture(t); saveJSON(f.file.replace('.session', '.json'), { user_id: '123', phone: '10000000000', two_fa: 'not-for-logs' });
   const bad = path.join(f.root, 'invalid.session'); fs.writeFileSync(bad, 'invalid');
   const output = path.join(f.root, 'output'), events = [];
   const c = new Converter({ output }, e => events.push(e), async () => { throw Error('UNEXPECTED_PROMPT'); }, async () => '123');
@@ -66,7 +66,7 @@ test('converter requests local passcode separately and preserves it only in memo
   const folder = path.join(f.root, 'tdata'); const td = await Tdata.create({ path: folder, passcode: 'private-code', crypto: cryptoProvider, fs: fileSystem, keyData: { count: 1, order: [0], active: 0 } });
   await td.writeMtpAuthorization({ userId: Long.fromNumber(123), mainDcId: 5, authKeys: [{ dcId: 5, key: f.session.authKey.getKey() }], authKeysToDestroy: [] }, 0);
   const output = path.join(f.root, 'output'); let asked = 0;
-  const c = new Converter({ output }, () => {}, async p => { assert.equal(p.kind, 'local-passcode'); asked++; return 'private-code'; }, async () => { throw Error('UNEXPECTED'); });
+  const c = new Converter({ output }, () => {}, async p => { assert.equal(p.kind, 'local-passcode'); asked++; return 'private-code'; }, async () => { throw Error('UNEXPECTED'); }, async () => '10000000000');
   const results = await c.run('tdata-to-session', [folder]); assert.equal(results[0].status, 'complete'); assert.equal(asked, 1);
   assert.ok(!fs.readFileSync(path.join(output, 'run.log'), 'utf8').includes('private-code'));
 });
@@ -77,3 +77,20 @@ test('multi-account tdata exports each account to its own directory', async t =>
   const files = await tdataToSessions(folder, path.join(f.root, 'out')); assert.equal(files.length, 2);
   assert.notEqual(path.dirname(files[0]), path.dirname(files[1]));
 });
+test('both conversion directions publish session and tdata in one phone directory', async t => {
+  const f = await fixture(t); saveJSON(f.file.replace('.session', '.json'), { user_id: '123', phone: '+10000000000' });
+  const output = path.join(f.root, 'canonical');
+  const c = new Converter({ output }, () => {}, async () => { throw Error('NO_PROMPT_EXPECTED'); }, async () => '123');
+  const exported = await c.run('session-to-tdata', [f.file]); assert.equal(exported[0].status, 'complete');
+  const account = path.join(output, '+10000000000');
+  assert.ok(fs.existsSync(path.join(account, 'session', 'test.session')));
+  assert.ok(fs.existsSync(path.join(account, 'tdata', 'key_datas')));
+  assert.equal(fs.existsSync(path.join(output, 'conversions')), false);
+  // Import from tdata with no embedded phone and resolve the actual account phone.
+  const c2 = new Converter({ output }, () => {}, async () => { throw Error('NO_PROMPT_EXPECTED'); }, async () => '123', async () => '10000000000');
+  const imported = await c2.run('tdata-to-session', [path.join(account, 'tdata')]);
+  assert.equal(imported[0].status, 'complete');
+  for (const file of imported[0].files.filter(f => f.endsWith('.session'))) assert.equal(path.dirname(file), path.join(account, 'session'));
+  assert.equal(fs.readdirSync(output).filter(n => n.startsWith('+')).length, 1);
+});
+
