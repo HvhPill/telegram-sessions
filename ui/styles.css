@@ -8,3 +8,5 @@
 .button.contact-button{width:35px;padding:0;color:#9c9ca8}.button.contact-button svg{width:18px;height:18px}.button.contact-button:hover{color:#eeeef6;background:#272731}
 
 .button.danger{color:#b38a91}.button.danger:hover:not(:disabled){color:#f0a5b1;border-color:#70424c;background:#301d25}.list-caption .button{min-height:26px;font-size:10px;margin-right:auto;margin-left:12px}
+
+.language-select{min-width:64px;padding:8px 10px;color:var(--text,#eee);background:#151519;border:1px solid #29292e;border-radius:8px;cursor:pointer}.language-select option{background:#151519;color:#eee}

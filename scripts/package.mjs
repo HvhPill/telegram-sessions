@@ -16,8 +16,8 @@ const destinations = await packager({
   overwrite: true,
   asar: { unpack: '**/*.node' },
   icon: path.join(root, 'assets', 'app.ico'),
-  appVersion: '2.1.0',
-  buildVersion: '2.1.0.0',
+  appVersion: '2.2.0',
+  buildVersion: '2.2.0.0',
   win32metadata: { ProductName: 'Telegram Sessions', FileDescription: 'Telegram Sessions', CompanyName: '' },
   ignore: [/^\/data(?:\/|$)/, /^\/dist(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/\.git(?:\/|$)/, /^\/README\.md$/, /^\/Руководство\.txt$/],
 });
@@ -27,5 +27,6 @@ for (const destination of destinations) {
     icon: path.join(root, 'assets', 'app.ico'),
   });
   await fs.copyFile(path.join(root, 'Руководство.txt'), path.join(destination, 'Руководство.txt'));
+  await fs.copyFile(path.join(root, 'GUIDE.en.md'), path.join(destination, 'GUIDE.en.md'));
   console.log(destination);
 }

@@ -45,6 +45,11 @@ async function fixture(t, options = {}) {
           if (options.login2fa) throw new Error('SESSION_PASSWORD_NEEDED');
           authorized = true; return {};
         }
+        if (request.className === 'auth.ResetAuthorizations') {
+          calls.push('resetOthers');
+          if (options.resetDenied) throw new Error('FRESH_RESET_AUTHORISATION_FORBIDDEN');
+          return true;
+        }
         if (request.className === 'account.GetPassword') return { hasPassword };
         if (request.className === 'auth.LogOut') {
           const currentName = events.filter(e => e.type === 'current').at(-1).name;
@@ -81,7 +86,9 @@ test('successful rotation verifies disk, logs out old and archives source', asyn
   assert.equal(fs.existsSync(f.source), false);
   const data = readJSON(path.join(f.output, '.state', 'account.json'));
   assert.equal(path.basename(path.dirname(path.dirname(data.session_file))), '+10000000000');
-  assert.equal(readJSON(data.json_file).session_file, data.session_file);
+  assert.equal(readJSON(data.json_file).session_file, '+10000000000');
+  assert.equal(path.basename(data.session_file), '+10000000000.session');
+  assert.equal(readJSON(data.json_file).twoFA, 'correct');
   assert.equal(path.basename(data.json_file, '.json'), path.basename(data.session_file, '.session'));
   assert.ok(!fs.readdirSync(f.output).some(name => name.endsWith('.session')));
   assert.equal(data.two_fa, 'correct'); assert.equal(data.status, 'complete');
@@ -241,3 +248,36 @@ test('additional login uses valid saved session after original was logged out', 
 });
 
 
+
+test('other authorizations are terminated before requesting the new login code', async t => {
+  const f = await fixture(t); const result = await f.engine.run(null);
+  assert.equal(result[0].status, 'complete');
+  assert.ok(f.calls.indexOf('resetOthers') < f.calls.indexOf('sendCode'));
+});
+test('Telegram reset restriction warns and continues without hiding failure', async t => {
+  const f = await fixture(t, { resetDenied:true }); const result = await f.engine.run(null);
+  assert.equal(result[0].status, 'complete');
+  assert.ok(f.events.some(e => e.type === 'warning' && e.code === 'FRESH_RESET_AUTHORISATION_FORBIDDEN'));
+  assert.equal(readJSON(path.join(f.output,'.state','account.json')).revoke_warning, 'FRESH_RESET_AUTHORISATION_FORBIDDEN');
+});
+test('resetting other authorizations can be disabled', async t => {
+  const f = await fixture(t); f.engine.config.revokeOthers = false;
+  await f.engine.run(null); assert.ok(!f.calls.includes('resetOthers'));
+});
+
+test('additional sessions keep phone-only names in numbered subfolders', async t => {
+  const f = await fixture(t); f.engine.config.keepOld = true; f.engine.config.forceNew = true; f.engine.config.revokeOthers = false;
+  await f.engine.run(['account.session']);
+  const first = readJSON(path.join(f.output, '.state', 'account.json')).session_file;
+  await f.engine.run(['account.session']);
+  const second = readJSON(path.join(f.output, '.state', 'account.json')).session_file;
+  assert.equal(path.basename(first), '+10000000000.session'); assert.equal(path.basename(second), '+10000000000.session');
+  assert.equal(path.dirname(second), path.join(f.output, '+10000000000', 'session', '2'));
+  assert.ok(fs.existsSync(first)); assert.equal(readJSON(second.replace('.session','.json')).session_file, '+10000000000');
+});
+
+test('resuming after failed source logout does not reset the new authorization', async t => {
+  const f = await fixture(t, { failedLogout: true });
+  await f.engine.run(null); assert.equal(f.calls.filter(c => c === 'resetOthers').length, 1);
+  await f.engine.run(null); assert.equal(f.calls.filter(c => c === 'resetOthers').length, 1);
+});

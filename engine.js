@@ -7,6 +7,7 @@ const { StringSession } = require('telegram/sessions');
 const { AuthKey } = require('telegram/crypto/AuthKey');
 const { Logger } = require('telegram/extensions/Logger');
 const initSql = require('sql.js');
+const { accountJSON } = require('./account-format');
 let sql;
 async function SQL() { return sql ||= await initSql({ locateFile: f => require.resolve('sql.js/dist/' + f) }); }
 function readJSON(file) {
@@ -99,7 +100,8 @@ async function writeSession(file, session) {
 function client(session, config) {
   const logger = new Logger('none');
   return new TelegramClient(session, Number(config.apiId), config.apiHash, {
-    deviceModel: 'Telegram Sessions Desktop', appVersion: '2.1.0',
+    deviceModel: config.device || 'Telegram Sessions Desktop', systemVersion: config.sdk || process.platform,
+    appVersion: config.app_version || '2.2.0', langCode: config.lang_code || 'en', systemLangCode: config.system_lang_code || 'en',
     connectionRetries: 2, requestRetries: 3, autoReconnect: false,
     floodSleepThreshold: 0, baseLogger: logger, useWSS: false,
   });
@@ -146,7 +148,16 @@ function accountLayout(output, stem, data, journal) {
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('INVALID_OUTPUT_PATH');
   fs.mkdirSync(path.join(folder, 'session'), { recursive: true });
   fs.mkdirSync(path.join(folder, 'tdata'), { recursive: true });
-  const target = path.join(folder, 'session', path.basename(original));
+  const filename = /^\d{5,20}$/.test(phone) ? '+' + phone + '.session' : path.basename(original);
+  let target = path.join(folder, 'session', filename);
+  const inside = path.relative(path.join(folder, 'session'), original);
+  if (data.account_folder === folder && !inside.startsWith('..') && !path.isAbsolute(inside) && path.basename(original) === filename) target = original;
+  else if (target !== original && fs.existsSync(target)) {
+    let index = 2;
+    while (fs.existsSync(path.join(folder, 'session', String(index), filename))) index++;
+    target = path.join(folder, 'session', String(index), filename);
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
   data.account_folder = folder;
   if (original !== target) {
     data.previous_session_file = original;
@@ -163,7 +174,7 @@ function accountLayout(output, stem, data, journal) {
   const companion = target.replace(/\.session$/, '.json');
   data.json_file = companion;
   saveJSON(journal, data);
-  saveJSON(companion, data);
+  saveJSON(companion, accountJSON(data, target));
   const legacy = path.join(output, stem + '.json');
   if (fs.existsSync(legacy) && readJSON(legacy).source_session === data.source_session) {
     const archive = path.join(output, '.state', 'legacy'); fs.mkdirSync(archive, { recursive: true });
@@ -176,7 +187,7 @@ class Engine {
     this.makeClient = overrides.makeClient || client;
   }
   event(type, data = {}) {
-    if (this.logFile && ['current', 'stage', 'result'].includes(type)) {
+    if (this.logFile && ['current', 'stage', 'result', 'warning'].includes(type)) {
       const detail = type === 'current' ? `Начало обработки ${data.index}/${data.total}` :
         type === 'result' ? `${data.status}: ${data.error || data.detail || ''}` : data.detail;
       const line = [data.name || '', detail || ''].map(value => String(value).replace(/[\r\n]/g, ' ')).join(' | ');
@@ -242,13 +253,13 @@ class Engine {
       saveJSON(journal, data);
     }
     if (!path.resolve(data.session_file).startsWith(config.output + path.sep) || path.resolve(data.session_file) === source) throw new Error('INVALID_OUTPUT_PATH');
-    const credentials = { ...config, apiId: data.api_id, apiHash: data.api_hash };
+    const credentials = { ...config, apiId: data.api_id, apiHash: data.api_hash, device: data.device, sdk: data.sdk, app_version: data.app_version, lang_code: data.lang_code, system_lang_code: data.system_lang_code };
     if (config.keepOld) data.keep_old = true;
     let old, fresh, who;
     const request = fn => this.request(fn, item.name);
     const commit = status => {
       data.status = status; data.updated_at = new Date().toISOString(); saveJSON(journal, data);
-      if (data.account_folder) saveJSON(data.session_file.replace(/\.session$/, '.json'), data);
+      if (data.account_folder) saveJSON(data.session_file.replace(/\.session$/, '.json'), accountJSON(data, data.session_file));
     };
     try {
       this.stage(item.name, 'connecting', 'Проверяем старую авторизацию');
@@ -265,6 +276,22 @@ class Engine {
         commit(data.status);
       } else if (!['ready_to_logout', 'old_logged_out'].includes(data.status)) throw new Error('OLD_SESSION_UNAUTHORIZED');
       const alreadyRevoked = !who;
+      // Only reset before a fresh login: retrying after login must not revoke the new key.
+      if (who && config.revokeOthers !== false && ['created', 'revoking_others'].includes(data.status)) {
+        commit('revoking_others');
+        this.stage(item.name, 'revoking', 'Завершаем остальные авторизации перед новым входом');
+        try {
+          const reset = await request(() => old.invoke(new Api.auth.ResetAuthorizations()));
+          if (reset !== true) throw new Error('RESET_AUTHORIZATIONS_NOT_CONFIRMED');
+          data.revoke_warning = null;
+          this.stage(item.name, 'revoked', 'Остальные авторизации завершены. Текущая сохранена для входа');
+        } catch (error) {
+          data.revoke_warning = errorCode(error);
+          this.event('warning', { name: item.name, code: data.revoke_warning,
+            detail: data.revoke_warning === 'FRESH_RESET_AUTHORISATION_FORBIDDEN' ? 'Telegram запрещает завершать другие сеансы в первые 24 часа. Продолжаем с предупреждением.' : 'Не удалось завершить остальные сеансы. Продолжаем с предупреждением: ' + data.revoke_warning });
+        }
+        commit('others_checked');
+      }
       accountLayout(config.output, stem, data, journal);
       const session = fs.existsSync(data.session_file) ? await loadSession(data.session_file) : new StringSession('');
       fresh = this.makeClient(session, credentials);
@@ -326,6 +353,8 @@ class Engine {
       for (const key of ['twoFA', '2fa', 'password']) if (key in data) data[key] = data.two_fa;
       this.stage(item.name, 'saving', '2FA проверена. Сохраняем новую сессию и JSON');
       Object.assign(data, { user_id: String(me.id), phone: me.phone, dc_id: fresh.session.dcId,
+        username: me.username ?? null, first_name: me.firstName || '', last_name: me.lastName || '',
+        is_premium: Boolean(me.premium), has_profile_pic: Boolean(me.photo && me.photo.className !== 'UserProfilePhotoEmpty'),
         server_address: fresh.session.serverAddress, port: fresh.session.port, library: 'GramJS', session_format: 'Telethon SQLite v7' });
       await writeSession(data.session_file, fresh.session);
       await fresh.destroy(); fresh = undefined;
@@ -392,6 +421,12 @@ class Engine {
           result = { name: item.name, status: code === 'CANCELLED' ? 'cancelled' : 'failed', error: code };
           if (error.seconds) result.retryAfter = error.seconds;
           if (code === 'CANCELLED') this.stop = true;
+        }
+        let journalData = {};
+        try { journalData = readJSON(path.join(config.output, '.state', path.basename(item.source, '.session') + '.json')); } catch { /* Preserve the original per-account error. */ }
+        if (journalData.revoke_warning) {
+          result.warning = journalData.revoke_warning;
+          result.detail = (result.detail || '') + ' · Предупреждение: ' + journalData.revoke_warning;
         }
         results.push(result);
         saveJSON(path.join(config.output, 'report.json'), { accounts: results });

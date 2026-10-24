@@ -83,7 +83,7 @@ test('both conversion directions publish session and tdata in one phone director
   const c = new Converter({ output }, () => {}, async () => { throw Error('NO_PROMPT_EXPECTED'); }, async () => '123');
   const exported = await c.run('session-to-tdata', [f.file]); assert.equal(exported[0].status, 'complete');
   const account = path.join(output, '+10000000000');
-  assert.ok(fs.existsSync(path.join(account, 'session', 'test.session')));
+  assert.ok(fs.existsSync(path.join(account, 'session', '+10000000000.session')));
   assert.ok(fs.existsSync(path.join(account, 'tdata', 'key_datas')));
   assert.equal(fs.existsSync(path.join(output, 'conversions')), false);
   // Import from tdata with no embedded phone and resolve the actual account phone.

@@ -170,12 +170,15 @@ function settings() {
   autoCode.innerHTML = '<input id="auto-code" type="checkbox"><span>Автоматически читать код входа из Telegram<small>Через старую сессию. Если не получится — ручной ввод.</small></span>';
   $('.modal .info-box').before(autoCode);
   $('#auto-code').checked = c.autoCode !== false;
+  const revoke = document.createElement('label'); revoke.className = 'auto-code-setting';
+  revoke.innerHTML = '<input id="revoke-others" type="checkbox"><span>Завершать остальные сеансы перед новым входом<small>Отключит другие устройства и ранее созданные сессии. При отказе Telegram появится предупреждение.</small></span>';
+  $('.modal .info-box').before(revoke); $('#revoke-others').checked = c.revokeOthers !== false;
   $('#show-hash').onclick = () => { $('#api-hash').type = $('#api-hash').type === 'password' ? 'text' : 'password'; };
   document.querySelectorAll('[data-folder]').forEach(button => button.onclick = async () => { try { const folder = await call(bridge.chooseFolder); if (folder) $('#' + button.dataset.folder).value = folder; } catch (e) { $('#settings-error').textContent = explain(e.message); } });
   $('#save-settings').onclick = async () => {
     const button = $('#save-settings'); button.disabled = true;
     try {
-      const result = await call(bridge.saveSettings, { apiId: $('#api-id').value.trim(), apiHash: $('#api-hash').value.trim(), maxWait: Number($('#wait').value), autoCode: $('#auto-code').checked, input: $('#input-folder').value.trim(), output: $('#output-folder').value.trim() });
+      const result = await call(bridge.saveSettings, { apiId: $('#api-id').value.trim(), apiHash: $('#api-hash').value.trim(), maxWait: Number($('#wait').value), language: window.interfaceI18n?.language || 'ru', autoCode: $('#auto-code').checked, revokeOthers: $('#revoke-others').checked, input: $('#input-folder').value.trim(), output: $('#output-folder').value.trim() });
       state.config = result.config; state.accounts = result.accounts; render(); await dismiss(); toast('Настройки сохранены');
     } catch (e) { $('#settings-error').textContent = explain(e.message); button.disabled = false; }
   };
@@ -232,6 +235,8 @@ async function event(data) {
     case 'prompt':
       // Closing the preceding modal is animated; serialize subsequent requests.
       if (state.modal) setTimeout(() => event(data), 180); else { status('Ожидаем ввод · ' + data.name); log(`${data.name} · Ожидаем ${data.kind === 'code' ? 'ручной ввод кода' : data.kind === 'user-id' ? 'ID аккаунта' : data.kind === 'local-passcode' ? 'локальный код tdata' : 'ввод пароля 2FA'}`); prompt(data); } break;
+    case 'warning':
+      log(`${data.name} · ${data.detail}`, 'error'); toast(data.detail, true); $('#task-description').textContent = data.detail; break;
     case 'result':
       { const account = state.accounts.find(a => a.name === data.name); if (account) { account.status = data.status; account.detail = data.error ? explain(data.error) : data.detail; } }
       state.finished++; $('#progress-fill').style.width = `${100 * state.finished / Math.max(state.total,1)}%`;
@@ -315,7 +320,7 @@ $('#conversion-results').onclick = () => call(bridge.openFolder, 'conversions').
 $('#contact').onclick = () => call(bridge.openContact).catch(failure);
 $('#about').onclick = () => {
   if (state.modal) return;
-  openModal('<div class="modal-heading"><h2 id="modal-title">Telegram Sessions</h2><button class="modal-close" id="close-about" aria-label="Закрыть"><i data-icon="close"></i></button></div><p class="description">Версия 2.1.0 · Windows x64</p><div class="info-box">Управление авторизациями Telegram, пакетная обработка аккаунтов и конвертация .session ↔ tdata.</div><p class="description">Данные обрабатываются на вашем компьютере. Рабочие папки и параметры подключения доступны в настройках.</p><div class="modal-footer"><button class="button primary" id="done-about">Готово</button></div>', 'about');
+  openModal('<div class="modal-heading"><h2 id="modal-title">Telegram Sessions</h2><button class="modal-close" id="close-about" aria-label="Закрыть"><i data-icon="close"></i></button></div><p class="description">Версия 2.2.0 · Windows x64</p><div class="info-box">Управление авторизациями Telegram, пакетная обработка аккаунтов и конвертация .session ↔ tdata.</div><p class="description">Данные обрабатываются на вашем компьютере. Рабочие папки и параметры подключения доступны в настройках.</p><div class="modal-footer"><button class="button primary" id="done-about">Готово</button></div>', 'about');
   $('#close-about').onclick = dismiss; $('#done-about').onclick = dismiss;
 };
 for (const action of ['minimize','maximize','close']) $('#' + action).onclick = () => call(bridge.window, action).catch(failure);

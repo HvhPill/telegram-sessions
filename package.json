@@ -1,6 +1,6 @@
 {
   "name": "telegram-sessions",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Desktop Telegram session manager",
   "private": true,
   "main": "main.js",

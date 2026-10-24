@@ -9,6 +9,7 @@ const { IGE } = require('telegram/crypto/IGE');
 const { StringSession } = require('telegram/sessions');
 const { AuthKey } = require('telegram/crypto/AuthKey');
 const { loadSession, writeSession, readJSON, saveJSON, errorCode } = require('./engine');
+const { accountJSON } = require('./account-format');
 const pbkdf2 = promisify(crypto.pbkdf2);
 // Use the same MTProto AES-IGE implementation as the existing GramJS client.
 const cryptoProvider = {
@@ -39,7 +40,7 @@ async function openTdata(folder, passcode = '') {
   return Tdata.open({ path: folder, crypto: cryptoProvider, fs: fileSystem, passcode, ignoreVersion: true });
 }
 function userIdFrom(data) {
-  for (const field of ['user_id', 'expected_user_id']) if (/^[1-9]\d{0,17}$/.test(String(data[field] || ''))) return String(data[field]);
+  for (const field of ['user_id', 'expected_user_id', 'id']) if (/^[1-9]\d{0,17}$/.test(String(data[field] || ''))) return String(data[field]);
   return null;
 }
 function safeName(value) { return String(value).replace(/[^\p{L}\p{N}_.-]/gu, '_').slice(0, 90) || 'account'; }
@@ -52,15 +53,25 @@ async function publishAccount(output, input, desktop, metadata) {
   const folder = path.join(output, normalizedPhone(metadata.phone));
   const sessions = path.join(folder, 'session');
   fs.mkdirSync(sessions, { recursive: true });
-  for (const entry of fs.readdirSync(sessions).filter(name => name.endsWith('.json'))) {
+  for (const entry of fs.readdirSync(sessions, { recursive: true }).filter(name => name.endsWith('.json'))) {
     const known = userIdFrom(readJSON(path.join(sessions, entry)));
     if (known && userIdFrom(metadata) && known !== userIdFrom(metadata)) throw new Error('ACCOUNT_FOLDER_IDENTITY_MISMATCH');
   }
-  let target = path.join(sessions, path.basename(input));
+  const filename = normalizedPhone(metadata.phone) + '.session';
+  let target = path.join(sessions, filename);
   if (fs.existsSync(target)) {
     const current = await loadSession(target), next = await loadSession(input);
-    if (!current.authKey.getKey().equals(next.authKey.getKey())) target = path.join(sessions, path.basename(input, '.session') + '_' + crypto.randomUUID().slice(0, 8) + '.session');
+    if (!current.authKey.getKey().equals(next.authKey.getKey())) {
+      let index = 2;
+      while (fs.existsSync(path.join(sessions, String(index), filename))) {
+        const existing = await loadSession(path.join(sessions, String(index), filename));
+        if (existing.authKey.getKey().equals(next.authKey.getKey())) break;
+        index++;
+      }
+      target = path.join(sessions, String(index), filename);
+    }
   }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
   if (path.resolve(input) !== path.resolve(target)) fs.copyFileSync(input, target);
   const tdata = path.join(folder, 'tdata');
   const staged = path.join(folder, '.tdata-' + crypto.randomUUID());
@@ -74,7 +85,7 @@ async function publishAccount(output, input, desktop, metadata) {
   catch (error) { if (backup && !fs.existsSync(tdata)) fs.renameSync(backup, tdata); throw error; }
   const json = { ...metadata, phone: normalizedPhone(metadata.phone).slice(1), session_file: target, json_file: target.replace(/\.session$/, '.json'), account_folder: folder, tdata_path: tdata };
   for (const key of ['source_session','status','expected_user_id']) delete json[key];
-  saveJSON(json.json_file, json);
+  saveJSON(json.json_file, accountJSON(json, target));
   // Keep companion paths current when older metadata refers to the moved file.
   return { session: target, tdata, folder };
 }
@@ -191,6 +202,7 @@ class Converter {
         let files;
         if (direction === 'session-to-tdata') {
           const metadata = readJSON(input.replace(/\.session$/i, '.json'));
+          metadata.api_id ??= this.config.apiId; metadata.api_hash ??= this.config.apiHash;
           let id = userIdFrom(metadata);
           if (!id) {
             this.event(name, 'Определяем ID аккаунта для Telegram Desktop');
@@ -215,6 +227,7 @@ class Converter {
                 for (const file of converted) {
                   const metadata = readJSON(file.replace(/\.session$/, '.json'));
                   metadata.phone = await this.phone(file, metadata, name);
+                  metadata.api_id ??= this.config.apiId; metadata.api_hash ??= this.config.apiHash;
                   metadata.conversion_source = input;
                   const generated = await sessionToTdata(file, path.join(staging, 'desktop-' + crypto.randomUUID()), metadata.user_id, metadata);
                   const published = await publishAccount(output, file, generated.folder, metadata);
@@ -228,10 +241,7 @@ class Converter {
             }
           }
         }
-        if (direction === 'tdata-to-session') for (const file of files.filter(file => file.endsWith('.session'))) {
-          const jsonPath = file.replace(/\.session$/, '.json');
-          const json = readJSON(jsonPath); json.conversion_source = input; saveJSON(jsonPath, json);
-        }
+
         this.event(name, `Готово. Создано: ${files.length}`, 'complete');
         results.push({ name, status: 'complete', files });
       } catch (error) {

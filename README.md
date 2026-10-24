@@ -77,4 +77,12 @@ See the [English user guide](GUIDE.en.md) or [Russian user guide](Руковод
 
 Electron, GramJS, sql.js, @mtcute/convert, adm-zip, and Inter. The font license is included in `ui/fonts/OFL.txt`; other dependency licenses are distributed with their respective packages.
 
-Telegram Sessions is an independent application and is not affiliated with Telegram. The current application interface is in Russian.
+Telegram Sessions is an independent application and is not affiliated with Telegram. The application interface supports Russian and English. Switch languages using the RU/EN selector in the header.
+
+## Version 2.2.0
+
+- Switch between Russian and English in the header; the choice is saved.
+- Before a new login, the app attempts to terminate all other Telegram authorizations. This includes other devices and previously generated sessions. Disable this behavior in Settings if you need to retain them. The current source authorization remains available for the login; normal rotation logs it out after the new session is verified. The second-session mode retains it.
+- If Telegram refuses the reset, processing continues with a visible warning recorded in the results. Telegram forbids resets from authorizations less than 24 hours old.
+- Exported sessions use phone-only names, for example `+123123123.session`. Additional independent sessions are kept under `session/2/`, `session/3/`, and so on, with the same phone-only filename.
+- Companion JSON uses the account template fields (`app_id`, `app_hash`, `twoFA`, profile fields, and `session_file`). The `session_file` field is the filename without its extension. Internal recovery paths and processing state stay in `.state`.

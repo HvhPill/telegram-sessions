@@ -13,7 +13,7 @@ function loadConfig() {
   try { data = readJSON(configPath); } catch {}
   let apiHash = '';
   try { if (data.encryptedHash && safeStorage.isEncryptionAvailable()) apiHash = safeStorage.decryptString(Buffer.from(data.encryptedHash, 'base64')); } catch {}
-  return { input: data.input || path.join(dataRoot, 'data', 'accounts'), output: data.output || path.join(dataRoot, 'data', 'new_sessions'), apiId: data.apiId || '', apiHash, maxWait: data.maxWait ?? 60, autoCode: data.autoCode !== false };
+  return { input: data.input || path.join(dataRoot, 'data', 'accounts'), output: data.output || path.join(dataRoot, 'data', 'new_sessions'), apiId: data.apiId || '', apiHash, maxWait: data.maxWait ?? 60, autoCode: data.autoCode !== false, revokeOthers: data.revokeOthers !== false, language: data.language === 'en' ? 'en' : 'ru' };
 }
 function send(event) { if (win && !win.isDestroyed()) win.webContents.send('event', event); }
 function prompt(data) {
@@ -31,7 +31,7 @@ function validate(data) {
   const input = path.resolve(data.input), output = path.resolve(data.output);
   if (input.toLowerCase() === output.toLowerCase()) throw new Error('INPUT_EQUALS_OUTPUT');
   if (!fs.existsSync(input) || !fs.statSync(input).isDirectory()) throw new Error('INPUT_FOLDER_MISSING');
-  return { input, output, apiId: Number(data.apiId), apiHash: data.apiHash, maxWait: Number(data.maxWait), autoCode: data.autoCode !== false };
+  return { input, output, apiId: Number(data.apiId), apiHash: data.apiHash, maxWait: Number(data.maxWait), autoCode: data.autoCode !== false, revokeOthers: data.revokeOthers !== false, language: data.language === 'en' ? 'en' : 'ru' };
 }
 function handle(name, fn) {
   ipcMain.handle(name, async (event, ...args) => {
@@ -68,6 +68,12 @@ else {
       if (engine) { event.preventDefault(); engine.stop = true; send({ type: 'notice', message: 'Очередь остановится после текущего аккаунта. Затем закройте окно.' }); }
     });
     handle('init', () => ({ config, accounts: discover(config.input, config.output), version: app.getVersion() }));
+    handle('set-language', language => {
+      if (!['ru','en'].includes(language)) throw new Error('INVALID_LANGUAGE');
+      config.language = language;
+      const stored = readJSON(configPath); stored.language = language; saveJSON(configPath, stored);
+      return language;
+    });
     handle('scan', () => discover(config.input, config.output));
     handle('open-contact', () => shell.openExternal('https://t.me/Kenjee132'));
     handle('account-folder', async name => {
@@ -93,7 +99,7 @@ else {
     });
     handle('import', async () => {
       if (engine) throw new Error('BUSY');
-      const result = await dialog.showOpenDialog(win, { title: 'Добавить аккаунты', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Telethon session', extensions: ['session'] }] });
+      const result = await dialog.showOpenDialog(win, { title: config.language === 'en' ? 'Add accounts' : 'Добавить аккаунты', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Telethon session', extensions: ['session'] }] });
       if (result.canceled) return { accounts: discover(config.input, config.output), imported: 0, skipped: 0 };
       fs.mkdirSync(config.input, { recursive: true });
       let imported = 0, skipped = 0;
@@ -118,9 +124,9 @@ else {
       if (engine) throw new Error('BUSY');
       if (!['session-to-tdata', 'tdata-to-session'].includes(direction)) throw new Error('INVALID_DIRECTION');
       const folder = direction === 'tdata-to-session' && kind === 'folder';
-      const result = await dialog.showOpenDialog(win, { title: folder ? 'Выберите tdata или папку с аккаунтами' : 'Выберите файлы для конвертации',
+      const result = await dialog.showOpenDialog(win, { title: config.language === 'en' ? (folder ? 'Select tdata or an accounts folder' : 'Select conversion files') : (folder ? 'Выберите tdata или папку с аккаунтами' : 'Выберите файлы для конвертации'),
         properties: folder ? ['openDirectory'] : ['openFile', 'multiSelections'],
-        filters: folder ? undefined : [{ name: direction === 'session-to-tdata' ? 'Telethon sessions' : 'Архивы tdata', extensions: direction === 'session-to-tdata' ? ['session'] : ['zip'] }] });
+        filters: folder ? undefined : [{ name: direction === 'session-to-tdata' ? 'Telethon sessions' : 'tdata ZIP', extensions: direction === 'session-to-tdata' ? ['session'] : ['zip'] }] });
       const files = result.canceled ? [] : result.filePaths;
       files.forEach(file => conversionInputs.add(path.resolve(file)));
       return files.map(file => ({ path: path.resolve(file), name: path.basename(file) }));
@@ -182,7 +188,7 @@ else {
       const known = discover(config.input, config.output);
       const accounts = names.map(name => known.find(a => a.name === name));
       if (accounts.some(a => !a)) throw new Error('INVALID_SELECTION');
-      const answer = await dialog.showMessageBox(win, { type: 'warning', title: 'Удалить аккаунты', message: `Убрать выбранные аккаунты из списка? (${accounts.length})`, detail: 'Исходные файлы будут перемещены в корзину. Готовые результаты сохранятся. Авторизации в Telegram не завершаются.', buttons: ['Отмена', 'В корзину'], defaultId: 0, cancelId: 0 });
+      const answer = await dialog.showMessageBox(win, { type: 'warning', title: config.language === 'en' ? 'Remove accounts' : 'Удалить аккаунты', message: config.language === 'en' ? `Remove selected accounts? (${accounts.length})` : `Убрать выбранные аккаунты из списка? (${accounts.length})`, detail: config.language === 'en' ? 'Source files will be moved to the Recycle Bin. Generated results and Telegram authorizations are preserved.' : 'Исходные файлы будут перемещены в корзину. Готовые результаты сохранятся. Авторизации в Telegram не завершаются.', buttons: config.language === 'en' ? ['Cancel', 'Recycle'] : ['Отмена', 'В корзину'], defaultId: 0, cancelId: 0 });
       if (answer.response !== 1) return { cancelled: true };
       for (const account of accounts) {
         const stem = account.name.replace(/\.session$/, '');
@@ -238,6 +244,20 @@ else {
           fs.writeFileSync(path.join(dataRoot, 'smoke-product.json'), JSON.stringify({ appPath: app.getAppPath(), contactUrl,
             ...await win.webContents.executeJavaScript(`({contactIcon:!!document.querySelector('#contact svg'),contactText:document.getElementById('contact').textContent.trim(),about:document.querySelector('#modal-title')?.textContent,errors:window.__errors})`) }));
         } finally { shell.openExternal = external; }
+        const languageTest = await win.webContents.executeJavaScript(`(async()=>{
+          await dismiss(); const select=document.getElementById('language');
+          select.value='en'; select.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,150));
+          settings(); await new Promise(r=>setTimeout(r,150));
+          const settingsEnglish=document.getElementById('modal-title').textContent==='Settings';
+          const revokeDefault=document.getElementById('revoke-others').checked;
+          await dismiss(); event({type:'stage',name:'demo-account-03.session',detail:'Проверяем старую авторизацию'});
+          await new Promise(r=>setTimeout(r,150));
+          const dynamicEnglish=document.getElementById('task-description').textContent==='Checking source authorization';
+          const english=document.documentElement.lang==='en'&&document.getElementById('settings').textContent.trim()==='Settings';
+          select.value='ru';select.dispatchEvent(new Event('change'));await new Promise(r=>setTimeout(r,150));
+          return {english,settingsEnglish,dynamicEnglish,revokeDefault,roundTrip:document.getElementById('settings').textContent.trim()==='Настройки',errors:window.__errors};
+        })()`);
+        fs.writeFileSync(path.join(dataRoot, 'smoke-language.json'), JSON.stringify(languageTest));
         const testRoot = fs.mkdtempSync(path.join(app.getPath('temp'), 'telegram-runtime-check-'));
         try {
           const { StringSession } = require('telegram/sessions'); const { AuthKey } = require('telegram/crypto/AuthKey');

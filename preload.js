@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (name, ...args) => ipcRenderer.invoke(name, ...args);
 contextBridge.exposeInMainWorld('manager', Object.freeze({
+  setLanguage: language => invoke('set-language', language),
   init: () => invoke('init'), scan: () => invoke('scan'),
   chooseFolder: () => invoke('choose-folder'), saveSettings: data => invoke('save-settings', data),
   importAccounts: () => invoke('import'), openFolder: which => invoke('open-folder', which),
