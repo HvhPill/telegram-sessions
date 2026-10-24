@@ -262,4 +262,12 @@ class Converter {
     return results;
   }
 }
-module.exports = { Converter, sessionToTdata, tdataToSessions, openTdata, tdataFolders, extractZip, cleanup, userIdFrom, cryptoProvider, fileSystem, publishAccount, normalizedPhone };
+async function exportAccountTdata(output, sessionFile, metadata) {
+  const root = path.join(output, '.state', 'conversion-staging'); fs.mkdirSync(root, {recursive:true});
+  const stage = fs.mkdtempSync(path.join(root, 'rotation-'));
+  try {
+    const generated = await sessionToTdata(sessionFile, path.join(stage,'desktop'), userIdFrom(metadata), metadata);
+    return await publishAccount(output, sessionFile, generated.folder, metadata);
+  } finally { fs.rmSync(stage, {recursive:true,force:true}); }
+}
+module.exports = { exportAccountTdata, Converter, sessionToTdata, tdataToSessions, openTdata, tdataFolders, extractZip, cleanup, userIdFrom, cryptoProvider, fileSystem, publishAccount, normalizedPhone };

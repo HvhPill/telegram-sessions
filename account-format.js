@@ -7,7 +7,7 @@ function accountJSON(data, file) {
     app_hash: data.api_hash ?? data.app_hash ?? '',
     device: data.device || 'Telegram Sessions Desktop',
     sdk: data.sdk || process.platform,
-    app_version: data.app_version || '2.2.0',
+    app_version: data.app_version || '2.3.0',
     system_lang_pack: data.system_lang_pack || '',
     system_lang_code: data.system_lang_code || 'en',
     lang_pack: data.lang_pack || '', lang_code: data.lang_code || 'en',

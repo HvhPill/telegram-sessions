@@ -281,3 +281,37 @@ test('resuming after failed source logout does not reset the new authorization',
   await f.engine.run(null); assert.equal(f.calls.filter(c => c === 'resetOthers').length, 1);
   await f.engine.run(null); assert.equal(f.calls.filter(c => c === 'resetOthers').length, 1);
 });
+
+test('rotation exports tdata with the NEW key before logging out the source', async t => {
+  const f = await fixture(t); const result = await f.engine.run(null);
+  assert.equal(result[0].status, 'complete');
+  const data = readJSON(path.join(f.output,'.state','account.json'));
+  const { openTdata } = require('../converter'); const td = await openTdata(data.tdata_path);
+  const auth = await td.readMtpAuthorization(0);
+  assert.deepEqual(Buffer.from(auth.authKeys.find(k=>k.dcId===auth.mainDcId).key),(await loadSession(data.session_file)).authKey.getKey());
+  assert.notDeepEqual(Buffer.from(auth.authKeys[0].key),Buffer.alloc(256,1));
+  assert.ok(f.events.findIndex(e=>e.stage==='tdata') < f.events.findIndex(e=>e.stage==='logout'));
+});
+test('failed tdata export never logs out the source and preserves the new session', async t => {
+  const f = await fixture(t); f.engine.exportTdata = async()=>{throw new Error('TDATA_VERIFICATION_FAILED');};
+  const [result] = await f.engine.run(null); assert.equal(result.status,'failed');
+  assert.ok(!f.calls.includes('logout')); assert.ok(fs.existsSync(f.source));
+  const data = readJSON(path.join(f.output,'.state','account.json'));
+  assert.ok(fs.existsSync(data.session_file));
+});
+test('fresh conversion completes a new login and exports both formats', async t => {
+  const f = await fixture(t); const { FreshConversion } = require('../fresh-conversion');
+  f.events.push({type:'current',name:'account.session'});
+  const converted = new FreshConversion(f.engine.config, e=>f.events.push(e), f.engine.prompt, {makeClient:f.engine.makeClient});
+  const [result] = await converted.run('session-to-tdata',[f.source]);
+  assert.equal(result.status,'complete'); assert.equal(result.files.length,2);
+  assert.ok(fs.existsSync(result.files[0])); assert.ok(fs.existsSync(path.join(result.files[1],'key_datas')));
+  assert.ok(f.calls.includes('logout')); assert.equal(fs.existsSync(f.source),false);
+});
+test('fresh conversion stops on a cancelled login without logging out', async t => {
+  const f = await fixture(t,{cancelPrompt:true}); const { FreshConversion } = require('../fresh-conversion');
+  const converted = new FreshConversion(f.engine.config, ()=>{}, f.engine.prompt, {makeClient:f.engine.makeClient});
+  const [result] = await converted.run('session-to-tdata',[f.source]);
+  assert.equal(result.status,'cancelled'); assert.equal(converted.stop,true);
+  assert.ok(fs.existsSync(f.source)); assert.ok(!f.calls.includes('logout'));
+});

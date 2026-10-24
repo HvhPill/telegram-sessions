@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('manager', Object.freeze({
   start: selected => invoke('start', selected), stop: () => invoke('stop'),
   startAdditional: selected => invoke('start-additional', selected), deleteAccounts: names => invoke('delete-accounts', names),
   reply: value => invoke('reply', value), window: action => invoke('window', action),
+  convertAccounts: names => invoke('convert-accounts', names),
   convertPick: data => invoke('convert-pick', data), convertStart: data => invoke('convert-start', data),
   openAccountFolder: name => invoke('account-folder', name),
   openContact: () => invoke('open-contact'),

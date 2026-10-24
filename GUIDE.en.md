@@ -1,4 +1,4 @@
-# User guide — Telegram Sessions 2.2.0
+# User guide — Telegram Sessions 2.3.0
 
 ## Getting started
 
@@ -40,10 +40,16 @@ Keep the executable with its supporting files, including `resources` and `locale
 
 The Telegram icon opens [@Kenjee132](https://t.me/Kenjee132). Third-party licenses are distributed with the app. Telegram Sessions is independent and is not affiliated with Telegram.
 
-## Version 2.2.0
+## Version 2.3.0
 
 - Switch between Russian and English in the header; the choice is saved.
 - Before a new login, the app attempts to terminate all other Telegram authorizations. This includes other devices and previously generated sessions. Disable this behavior in Settings if you need to retain them. The current source authorization remains available for the login; normal rotation logs it out after the new session is verified. The second-session mode retains it.
 - If Telegram refuses the reset, processing continues with a visible warning recorded in the results. Telegram forbids resets from authorizations less than 24 hours old.
 - Exported sessions use phone-only names, for example `+123123123.session`. Additional independent sessions are kept under `session/2/`, `session/3/`, and so on, with the same phone-only filename.
 - Companion JSON uses the account template fields (`app_id`, `app_hash`, `twoFA`, profile fields, and `session_file`). The `session_file` field is the filename without its extension. Internal recovery paths and processing state stay in `.state`.
+
+## Version 2.3.0: session and tdata together
+
+Normal session rotation and second-session creation now export both the .session file and tdata. The app reopens and checks tdata before logging out of the source. If tdata export fails, the source remains active and the newly saved session is retained for retry. Running an already completed account also restores its tdata output.
+
+In Conversion, choose Select accounts to add imported accounts to the queue. Enable Create a new session before conversion for a new login followed by verified .session and tdata output. Without this option, conversion preserves the existing authorization. New-login mode requires your API credentials and may request a login code or 2FA password.

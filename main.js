@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Engine, discover, readJSON, saveJSON, errorCode, client, identity, loadSession } = require('./engine');
 const { Converter } = require('./converter');
+const { FreshConversion } = require('./fresh-conversion');
 const conversionInputs = new Set();
 let win, engine, pending;
 let config;
@@ -131,9 +132,26 @@ else {
       files.forEach(file => conversionInputs.add(path.resolve(file)));
       return files.map(file => ({ path: path.resolve(file), name: path.basename(file) }));
     });
-    handle('convert-start', async ({ direction, inputs }) => {
+    handle('convert-accounts', async names => {
+      if (engine) throw new Error('BUSY');
+      if (!Array.isArray(names) || !names.length || names.some(name => typeof name !== 'string' || path.basename(name) !== name)) throw new Error('INVALID_SELECTION');
+      const accounts = discover(config.input, config.output);
+      return names.map(name => {
+        const account = accounts.find(item => item.name === name); if (!account) throw new Error('INVALID_SELECTION');
+        const journal = readJSON(path.join(config.output,'.state',path.basename(name,'.session')+'.json'));
+        const original = path.resolve(account.source);
+        const file = fs.existsSync(original) ? original : path.resolve(journal.session_file || original);
+        if (file !== original && !file.startsWith(path.resolve(config.output)+path.sep)) throw new Error('INVALID_OUTPUT_PATH');
+        if (!fs.existsSync(file)) throw new Error('SESSION_FILE_MISSING');
+        conversionInputs.add(original); conversionInputs.add(file);
+        return {name, path:file, source:original};
+      });
+    });
+    handle('convert-start', async ({ direction, inputs, fresh = false }) => {
       if (engine) throw new Error('BUSY');
       if (!['session-to-tdata', 'tdata-to-session'].includes(direction) || !Array.isArray(inputs) || !inputs.length || inputs.some(file => typeof file !== 'string' || !conversionInputs.has(path.resolve(file)))) throw new Error('INVALID_CONVERSION_INPUT');
+      if (typeof fresh !== 'boolean' || (fresh && direction !== 'session-to-tdata')) throw new Error('INVALID_DIRECTION');
+      if (fresh) config = validate(config);
       const resolveUserId = async (file, name) => {
         if (Number(config.apiId) > 0 && /^[a-f0-9]{32}$/i.test(config.apiHash)) {
           const existing = client(await loadSession(file), config);
@@ -157,7 +175,7 @@ else {
         }
         return prompt({ name, kind: 'phone-number', title: 'Номер аккаунта', description: 'Номер отсутствует в данных tdata. Введите номер этого аккаунта с кодом страны — он будет названием единой папки.' });
       };
-      const instance = new Converter({ ...config, output: path.resolve(config.output) }, send, prompt, resolveUserId, resolvePhone);
+      const instance = fresh ? new FreshConversion({...config, output:path.resolve(config.output)}, send, prompt) : new Converter({ ...config, output: path.resolve(config.output) }, send, prompt, resolveUserId, resolvePhone);
       engine = instance;
       setImmediate(async () => {
         try { const results = await instance.run(direction, [...new Set(inputs)]); send({ type: 'conversion-done', results, stopped: instance.stop }); }
@@ -244,6 +262,18 @@ else {
           fs.writeFileSync(path.join(dataRoot, 'smoke-product.json'), JSON.stringify({ appPath: app.getAppPath(), contactUrl,
             ...await win.webContents.executeJavaScript(`({contactIcon:!!document.querySelector('#contact svg'),contactText:document.getElementById('contact').textContent.trim(),about:document.querySelector('#modal-title')?.textContent,errors:window.__errors})`) }));
         } finally { shell.openExternal = external; }
+        const freshUiTest = await win.webContents.executeJavaScript(`(async()=>{
+          await dismiss();setBusy(false);document.querySelector('[data-tab=convert]').click();document.querySelector('[data-direction=session-to-tdata]').click();
+          document.getElementById('conversion-fresh').click();const fresh=conversion.fresh&&!document.getElementById('conversion-options').hidden;
+          document.getElementById('conversion-accounts').click();await new Promise(r=>setTimeout(r,150));
+          const picker=document.querySelectorAll('[data-conversion-account]').length===3;
+          document.getElementById('conversion-check-all').click();const all=document.querySelectorAll('[data-conversion-account]:checked').length===3;
+          await dismiss();document.querySelector('[data-direction=tdata-to-session]').click();
+          const hidden=document.getElementById('conversion-options').hidden&&document.getElementById('conversion-accounts').hidden;
+          document.querySelector('[data-direction=session-to-tdata]').click();
+          return {fresh,picker,all,hidden,bridge:typeof window.manager.convertAccounts,errors:window.__errors};
+        })()`);
+        fs.writeFileSync(path.join(dataRoot,'smoke-fresh-conversion.json'),JSON.stringify(freshUiTest));
         const languageTest = await win.webContents.executeJavaScript(`(async()=>{
           await dismiss(); const select=document.getElementById('language');
           select.value='en'; select.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,150));

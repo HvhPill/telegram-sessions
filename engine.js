@@ -101,7 +101,7 @@ function client(session, config) {
   const logger = new Logger('none');
   return new TelegramClient(session, Number(config.apiId), config.apiHash, {
     deviceModel: config.device || 'Telegram Sessions Desktop', systemVersion: config.sdk || process.platform,
-    appVersion: config.app_version || '2.2.0', langCode: config.lang_code || 'en', systemLangCode: config.system_lang_code || 'en',
+    appVersion: config.app_version || '2.3.0', langCode: config.lang_code || 'en', systemLangCode: config.system_lang_code || 'en',
     connectionRetries: 2, requestRetries: 3, autoReconnect: false,
     floodSleepThreshold: 0, baseLogger: logger, useWSS: false,
   });
@@ -185,6 +185,7 @@ class Engine {
   constructor(config, emit, prompt, overrides = {}) {
     this.config = config; this.emit = emit; this.prompt = prompt; this.stop = false;
     this.makeClient = overrides.makeClient || client;
+    this.exportTdata = overrides.exportTdata || ((output, file, metadata) => require('./converter').exportAccountTdata(output, file, metadata));
   }
   event(type, data = {}) {
     if (this.logFile && ['current', 'stage', 'result', 'warning'].includes(type)) {
@@ -240,6 +241,8 @@ class Engine {
     }
     if (data.status === 'complete') {
       accountLayout(config.output, stem, data, journal);
+      const desktop = await this.exportTdata(config.output, data.session_file, data);
+      data.tdata_path = desktop.tdata; saveJSON(journal, data);
       return { status: 'complete', detail: 'Уже обработан · ' + path.basename(data.account_folder) };
     }
     if (!data.source_session) {
@@ -363,6 +366,9 @@ class Engine {
       await fresh.connect();
       const persisted = await request(() => identity(fresh));
       if (!persisted || String(persisted.id) !== data.expected_user_id) throw new Error('PERSISTED_SESSION_INVALID');
+      this.stage(item.name, 'tdata', 'Создаём и проверяем tdata для новой авторизации');
+      const desktop = await this.exportTdata(config.output, data.session_file, data);
+      data.tdata_path = desktop.tdata;
       commit('ready_to_logout');
       this.stage(item.name, 'verified', 'Новая сессия успешно открыта с диска и проверена');
       if (data.keep_old) {

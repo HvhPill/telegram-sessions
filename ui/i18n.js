@@ -1,6 +1,15 @@
 'use strict';
 (function () {
 const phrases = {
+'Создать новую сессию перед конвертацией':'Create a new session before conversion',
+'Новый вход → проверка .session и tdata → выход из исходной сессии.':'New login → verify .session and tdata → log out the source session.',
+'Выбрать аккаунты':'Select accounts','Выбрать все':'Select all','Добавить выбранные':'Add selected',
+'Сначала добавьте аккаунты во вкладке «Аккаунты»':'Add accounts in the Accounts tab first',
+'Выберите хотя бы один аккаунт':'Select at least one account',
+'Обычная конвертация сохраняет текущую авторизацию. Включите новую сессию для создания отдельного ключа.':'Standard conversion preserves the existing authorization. Enable a new session to create a separate key.',
+'Будет выполнен новый вход. Исходная сессия завершится только после проверки .session и tdata.':'A new login will be performed. The source session will be logged out only after .session and tdata are verified.',
+'Создаём и проверяем tdata для новой авторизации':'Creating and verifying tdata for the new authorization',
+'Новая сессия и tdata созданы и проверены':'New session and tdata created and verified',
 'Предупреждение:':'Warning:',
 'Очередь остановится после текущего аккаунта. Затем закройте окно.':'The queue will stop after the current account. Close the window afterwards.',
 'ID аккаунта для tdata':'User ID for tdata',

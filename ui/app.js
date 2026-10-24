@@ -2,7 +2,7 @@
 const $ = selector => document.querySelector(selector);
 const bridge = window.manager;
 const state = { config: null, accounts: [], selected: new Set(), busy: false, current: null, total: 0, finished: 0, modal: null, lastFocus: null };
-const conversion = { direction: 'session-to-tdata', inputs: [], results: new Map(), running: false };
+const conversion = { fresh:false, direction: 'session-to-tdata', inputs: [], results: new Map(), running: false };
 window.__errors = [];
 window.addEventListener('error', e => window.__errors.push(e.message));
 const paths = {
@@ -87,9 +87,12 @@ function renderConversion() {
   document.querySelectorAll('[data-direction]').forEach(button => {
     button.classList.toggle('active', button.dataset.direction === conversion.direction); button.disabled = state.busy;
   });
+  $('#conversion-options').hidden = !toTdata; $('#conversion-accounts').hidden = !toTdata;
+  $('#conversion-fresh').disabled = state.busy;
+  $('#conversion-auth-note').textContent = toTdata && conversion.fresh ? 'Будет выполнен новый вход. Исходная сессия завершится только после проверки .session и tdata.' : 'Обычная конвертация сохраняет текущую авторизацию. Включите новую сессию для создания отдельного ключа.';
   $('#conversion-pick-label').textContent = toTdata ? 'Выбрать .session' : 'Выбрать папку tdata';
   $('#conversion-zip').hidden = toTdata;
-  for (const id of ['conversion-pick','conversion-zip','conversion-clear']) $('#' + id).disabled = state.busy;
+  for (const id of ['conversion-pick','conversion-zip','conversion-clear','conversion-accounts']) $('#' + id).disabled = state.busy;
   $('#conversion-start').disabled = state.busy || !conversion.inputs.length;
   $('#conversion-empty').hidden = conversion.inputs.length > 0;
   $('#conversion-hint').textContent = toTdata ? 'Можно добавить несколько .session. ID аккаунта берётся из JSON или определяется через API.' : 'Выберите tdata, папку с несколькими аккаунтами или ZIP. Локальный код блокировки запросится при необходимости.';
@@ -108,7 +111,8 @@ async function pickConversion(kind) {
 async function startConversion() {
   if (state.busy || !conversion.inputs.length) return;
   try {
-    await call(bridge.convertStart, { direction: conversion.direction, inputs: conversion.inputs.map(input => input.path) });
+    if (conversion.fresh && conversion.direction === 'session-to-tdata' && (!state.config.apiId || !state.config.apiHash)) {settings(); toast('Сначала укажите API ID и API hash'); return;}
+    await call(bridge.convertStart, { direction: conversion.direction, fresh: conversion.direction === 'session-to-tdata' && conversion.fresh, inputs: conversion.inputs.map(input => conversion.fresh && conversion.direction === 'session-to-tdata' ? input.source || input.path : input.path) });
     conversion.results.clear(); conversion.running = true; setBusy(true); status('Конвертация запущена');
     log('Конвертация · ' + (conversion.direction === 'session-to-tdata' ? '.session → tdata' : 'tdata → .session'));
   } catch (error) { failure(error); }
@@ -312,6 +316,19 @@ document.querySelectorAll('[data-direction]').forEach(button => button.onclick =
   if (state.busy || conversion.direction === button.dataset.direction) return;
   conversion.direction = button.dataset.direction; conversion.inputs = []; conversion.results.clear(); renderConversion();
 });
+$('#conversion-fresh').onchange = () => { conversion.fresh = $('#conversion-fresh').checked; renderConversion(); };
+$('#conversion-accounts').onclick = () => {
+  if (state.busy) return;
+  if (!state.accounts.length) { toast('Сначала добавьте аккаунты во вкладке «Аккаунты»'); return; }
+  openModal('<div class="modal-heading"><h2 id="modal-title">Выбрать аккаунты</h2><button class="modal-close" id="cancel-conversion-accounts" aria-label="Закрыть">'+icon('close')+'</button></div><div class="conversion-account-list">'+state.accounts.map((account,index)=>'<label class="auto-code-setting"><input type="checkbox" data-conversion-account="'+index+'" '+(state.selected.has(account.name)?'checked':'')+'><span>'+escape(account.phone?'+'+String(account.phone).replace(/^\+/, ''):account.name)+'</span></label>').join('')+'</div><div class="modal-footer"><button class="button" id="conversion-check-all">Выбрать все</button><button class="button primary" id="add-conversion-accounts">Добавить выбранные</button></div>', 'conversion-accounts');
+  $('#cancel-conversion-accounts').onclick = dismiss;
+  $('#conversion-check-all').onclick = () => document.querySelectorAll('[data-conversion-account]').forEach(el=>{el.checked=true;});
+  $('#add-conversion-accounts').onclick = async () => {
+    const names=[...document.querySelectorAll('[data-conversion-account]:checked')].map(el=>state.accounts[Number(el.dataset.conversionAccount)].name);
+    if (!names.length) {toast('Выберите хотя бы один аккаунт');return;}
+    try {const inputs=await call(bridge.convertAccounts,names);for(const input of inputs) if(!conversion.inputs.some(item=>item.path===input.path)) conversion.inputs.push(input);renderConversion();await dismiss();}catch(error){failure(error);}
+  };
+};
 $('#conversion-pick').onclick = () => pickConversion(conversion.direction === 'tdata-to-session' ? 'folder' : 'files');
 $('#conversion-zip').onclick = () => pickConversion('zip');
 $('#conversion-clear').onclick = () => { conversion.inputs = []; conversion.results.clear(); renderConversion(); };
@@ -320,7 +337,7 @@ $('#conversion-results').onclick = () => call(bridge.openFolder, 'conversions').
 $('#contact').onclick = () => call(bridge.openContact).catch(failure);
 $('#about').onclick = () => {
   if (state.modal) return;
-  openModal('<div class="modal-heading"><h2 id="modal-title">Telegram Sessions</h2><button class="modal-close" id="close-about" aria-label="Закрыть"><i data-icon="close"></i></button></div><p class="description">Версия 2.2.0 · Windows x64</p><div class="info-box">Управление авторизациями Telegram, пакетная обработка аккаунтов и конвертация .session ↔ tdata.</div><p class="description">Данные обрабатываются на вашем компьютере. Рабочие папки и параметры подключения доступны в настройках.</p><div class="modal-footer"><button class="button primary" id="done-about">Готово</button></div>', 'about');
+  openModal('<div class="modal-heading"><h2 id="modal-title">Telegram Sessions</h2><button class="modal-close" id="close-about" aria-label="Закрыть"><i data-icon="close"></i></button></div><p class="description">Версия 2.3.0 · Windows x64</p><div class="info-box">Управление авторизациями Telegram, пакетная обработка аккаунтов и конвертация .session ↔ tdata.</div><p class="description">Данные обрабатываются на вашем компьютере. Рабочие папки и параметры подключения доступны в настройках.</p><div class="modal-footer"><button class="button primary" id="done-about">Готово</button></div>', 'about');
   $('#close-about').onclick = dismiss; $('#done-about').onclick = dismiss;
 };
 for (const action of ['minimize','maximize','close']) $('#' + action).onclick = () => call(bridge.window, action).catch(failure);
